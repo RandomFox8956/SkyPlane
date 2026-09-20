@@ -33,7 +33,7 @@ def cube(name, pos, size, mat, bevel=.015):
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     o.data.materials.append(mat)
     if bevel:
-        mod=o.modifiers.new('Soft machined edges','BEVEL'); mod.width=bevel; mod.segments=1
+        mod=o.modifiers.new('Soft machined edges','BEVEL'); mod.width=bevel; mod.segments=3 if bevel>=.035 else 1
     return o
 def beam(name,a,b,width,mat):
     aa,bb=Vector(point(a)),Vector(point(b))
@@ -54,7 +54,12 @@ def surface(name, corners, mat, divisions=1):
         for i in range(divisions):
             k=j*(divisions+1)+i;faces.append((k,k+1,k+divisions+2,k+divisions+1))
     mesh=bpy.data.meshes.new(name);mesh.from_pydata(verts,[],faces);mesh.materials.append(mat)
-    o=bpy.data.objects.new(name,mesh);scene.collection.objects.link(o);o['two_sided']=True;return o
+    o=bpy.data.objects.new(name,mesh);scene.collection.objects.link(o);o['two_sided']=True
+    if mat in (liner,shell):
+        # Real panel thickness keeps adjacent curved panels sealed at tessellation joins.
+        skin=o.modifiers.new('Cabin panel thickness','SOLIDIFY');skin.thickness=.05;skin.offset=0
+        o['two_sided']=False
+    return o
 def label(text, pos, width, right=(1,0,0), up=(0,1,0), height=.035):
     p=Vector(pos);r=Vector(right)*width/2;u=Vector(up)*height/2
     labels.append(dict(v=[list(p-r+u),list(p+r+u),list(p+r-u),list(p-r-u)],c='#18262a',t=text,tc='#d7e0d5',d=0))
@@ -77,21 +82,20 @@ for side in [-1,1]:
     surface('Laminated front windshield',front,glass)
     for i in range(4):beam('Windscreen gasket',front[i],front[(i+1)%4],.055,rubber)
     beam('Swept windscreen pillar',(side*1.31,1.28,-2.16),(side*1.14,2.32,-1.83),.085,liner)
-    # Side window extends behind the pilot, with a fixed aft quarter pane.
-    pane=[(side*1.36,1.05,-1.95),(side*1.42,1.05,.55),(side*1.42,2.23,.55),(side*1.17,2.27,-1.77)]
-    surface('Side window glass',pane,glass)
+    # Only the forward side is glazed; the shoulder and seat area is solid cabin lining.
+    pane=[(side*1.36,1.05,-1.95),(side*1.42,1.05,-.45),(side*1.42,2.23,-.45),(side*1.17,2.27,-1.77)]
+    surface('Side window glass',pane,glass,8)
     for i in range(4):beam('Side window frame',pane[i],pane[(i+1)%4],.09,liner)
-    beam('Side window divider',(side*1.40,1.05,-.20),(side*1.32,2.25,-.20),.052,rubber)
     surface('Front corner glazing',[front[1],pane[0],pane[3],front[2]],glass)
     # Shell panels meet the exact same boundary vertices as the glazing and floor.
     surface('Lower window corner',[(side*1.42,0,-2.27),(side*1.42,0,-1.95),pane[0],front[1]],liner,3)
-    surface('Lower cabin wall',[(side*1.42,0,-1.95),(side*1.42,0,.55),pane[1],pane[0]],liner,8)
-    surface('Lower aft cabin wall',[(side*1.42,0,.55),(side*1.42,0,1.85),(side*1.42,1.05,1.85),pane[1]],liner,4)
-    surface('Aft sidewall',[(side*1.42,1.05,.55),(side*1.42,1.05,1.85),(side*1.42,2.23,1.85),(side*1.42,2.23,.55)],liner,4)
+    surface('Lower cabin wall',[(side*1.42,0,-1.95),(side*1.42,0,-.45),pane[1],pane[0]],liner,8)
+    surface('Lower aft cabin wall',[(side*1.42,0,-.45),(side*1.42,0,1.85),(side*1.42,1.05,1.85),pane[1]],liner,8)
+    surface('Aft sidewall',[pane[1],(side*1.42,1.05,1.85),(side*1.42,2.23,1.85),pane[2]],liner,10)
     surface('Curved roof shoulder',[pane[3],pane[2],(side*1.42,2.23,1.85),(side*1.08,2.48,1.85)],liner,6)
     surface('Front roof corner',[front[2],pane[3],(side*1.08,2.48,1.85),(side*1.14,2.27,-1.83)],liner,4)
     cube('Padded side arm ledge',(side*1.34,.98,-.45),(.16,.075,2.65),shell,.025)
-    cube('Window latch',(side*1.30,1.13,-.30),(.07,.04,.18),metal,.01)
+    cube('Window latch',(side*1.30,1.13,-.70),(.07,.04,.18),metal,.01)
     cube('Sidewall storage pocket',(side*1.32,.56,.65),(.13,.28,.42),rubber,.025)
 surface('Ceiling',[(-1.14,2.27,-1.83),(1.14,2.27,-1.83),(1.08,2.48,1.85),(-1.08,2.48,1.85)],liner,9)
 surface('Back wall',[(-1.42,0,1.85),(1.42,0,1.85),(1.42,2.48,1.85),(-1.42,2.48,1.85)],liner,8)
@@ -198,7 +202,7 @@ for side in [-1,1]:
         cube('Window trim fastener',(side*1.326,1.02,z),(.020,.017,.017),metal,.004)
     beam('Cabin grab handle',(side*1.29,1.64,.64),(side*1.29,1.97,.64),.036,metal)
     for y in [1.64,1.97]:beam('Handle standoff',(side*1.29,y,.64),(side*1.40,y,.64),.025,shell)
-    label('WINDOW LOCK',(side*1.315,1.17,-.30),.26,right=(0,0,side),height=.026)
+    label('WINDOW LOCK',(side*1.315,1.17,-.70),.26,right=(0,0,side),height=.026)
 
 # Labelled lower switch bank and panel service screws.
 for i,title in enumerate(['BATT','ALT','AVIONICS','PITOT','BEACON','NAV','LAND']):
@@ -247,6 +251,33 @@ label('FIRE',(-.99,.43,1.419),.12,right=(-1,0,0),height=.04)
 label('EXIT',(0,2.21,1.78),.26,right=(-1,0,0),height=.055)
 
 # Export evaluated Blender geometry into the game's offline polygon format.
+# Shared deformation gives the complete enclosure a barrel section, including its
+# window boundaries and attached trim. The instrument panel stays in its original plane.
+def rounded_cabin(p):
+    x,y,z=p
+    t=max(0,min(1,(z+1.95)/1.20)); t=t*t*(3-2*t)
+    height=max(0,min(1,y/2.48))
+    x2=x*(1-t*.12*(1-math.sin(math.pi*height)))
+    y2=y-t*.52*(abs(x)/1.42)**2.2*max(0,min(1,(y-1.0)/1.48))
+    return Vector((x2,y2,z))
+
+# Bake the same shape into the editable Blender model and the game export.
+for ob in list(scene.objects):
+    if ob.type!='MESH': continue
+    bpy.context.view_layer.objects.active=ob
+    for mod in list(ob.modifiers): bpy.ops.object.modifier_apply(modifier=mod.name)
+    inv=ob.matrix_world.inverted()
+    for v in ob.data.vertices:
+        p=ob.matrix_world @ v.co
+        q=rounded_cabin((p.x,p.z,-p.y))
+        v.co=inv @ Vector(point(q))
+    ob.data.update()
+for item in labels:
+    item['v']=[list(rounded_cabin(p)) for p in item['v']]
+for ob in scene.objects:
+    if ob.type=='FONT':
+        p=ob.location; ob.location=point(rounded_cabin((p.x,p.z,-p.y)))
+bpy.context.view_layer.update()
 shell_panels={'Sealed cabin floor','Front pressure bulkhead','Lower cabin wall','Lower aft cabin wall','Aft sidewall','Curved roof shoulder','Front roof corner','Ceiling','Back wall','Lower window corner','Laminated front windshield','Side window glass','Front corner glazing'}
 base_panels={'Anti-slip floor mat','Overhead console'}
 deps=bpy.context.evaluated_depsgraph_get(); faces=[]
@@ -278,5 +309,8 @@ for area in bpy.context.screen.areas:
     if area.type=='VIEW_3D':
         area.spaces.active.region_3d.view_perspective='CAMERA'
         area.spaces.active.shading.color_type='MATERIAL'
-bpy.ops.wm.save_as_mainfile(filepath=str(OUT/'skyplane-cockpit.blend'))
+save_versions=bpy.context.preferences.filepaths.save_version
+bpy.context.preferences.filepaths.save_version=0
+try: bpy.ops.wm.save_as_mainfile(filepath=str(OUT/'skyplane-cockpit.blend'))
+finally: bpy.context.preferences.filepaths.save_version=save_versions
 print('EXPORTED',len(faces),'faces')

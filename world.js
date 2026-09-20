@@ -276,6 +276,60 @@
     if(ox||oz)for(const f of m)f.v=f.v.map(p=>[p[0]+ox,p[1],p[2]+oz]);
     return m;
   }
+  // Spatially indexed triangles come from the rendered scenery, including decorative meshes.
+  const COLLISION_CACHE=new Map(),COLLISION_CELL=160;
+  function collisionIndex(isle){
+    const key=isle.map.id+':'+JSON.stringify(isle.buildings||{});
+    if(COLLISION_CACHE.has(key))return COLLISION_CACHE.get(key);
+    const cells=new Map();
+    for(const f of buildWorld(isle.buildings||root.SkyCore.EQUIPPED,'#ffffff',isle.map)){
+      if(f.v.every(p=>p[1]<=3))continue; // Runway, apron, water and markings are landing surfaces.
+      for(let i=1;i<f.v.length-1;i++){
+        const tri=[f.v[0],f.v[i],f.v[i+1]],lo=[0,1,2].map(k=>Math.min(...tri.map(p=>p[k]))),hi=[0,1,2].map(k=>Math.max(...tri.map(p=>p[k])));
+        const item={tri,lo,hi};
+        for(let x=Math.floor(lo[0]/COLLISION_CELL);x<=Math.floor(hi[0]/COLLISION_CELL);x++)for(let z=Math.floor(lo[2]/COLLISION_CELL);z<=Math.floor(hi[2]/COLLISION_CELL);z++){
+          const cell=x+','+z;if(!cells.has(cell))cells.set(cell,[]);cells.get(cell).push(item);
+        }
+      }
+    }
+    if(COLLISION_CACHE.size>=32)COLLISION_CACHE.delete(COLLISION_CACHE.keys().next().value);
+    COLLISION_CACHE.set(key,cells);return cells;
+  }
+  function segmentTriangle(a,b,tri){
+    const d=sub(b,a),e1=sub(tri[1],tri[0]),e2=sub(tri[2],tri[0]),h=cross(d,e2),det=dot(e1,h);
+    if(Math.abs(det)<1e-9)return false;
+    const inv=1/det,s=sub(a,tri[0]),u=dot(s,h)*inv;if(u<0||u>1)return false;
+    const q=cross(s,e1),v=dot(d,q)*inv;if(v<0||u+v>1)return false;
+    const t=dot(e2,q)*inv;return t>=0&&t<=1;
+  }
+  function sceneryCollision(f,previous){
+    const jet=f.type==='passenger',span=jet?8.5:8;
+    const probes=[[-span,.7,1],[span,.7,1],[0,.7,jet?-6.8:-5.5],[0,.7,jet?7:5],[0,2,0],[0,-.2,0],[0,jet?4.5:4.1,jet?6:4.3]];
+    for(let x=-6;x<=6;x+=2)probes.push([x,.7,1]);
+    const pose=(state)=>transformed([{v:probes,c:''}],state.x,state.y+2,state.z,state.yaw??f.yaw,state.pitch??f.pitch,state.roll??f.roll)[0].v;
+    const before=pose(previous),after=pose(f),segments=before.map((p,i)=>[p,after[i]]);
+    const swept=[];
+    for(const [a,b] of [[0,1],[2,3]])swept.push([before[a],before[b],after[b]],[before[a],after[b],after[a]]);
+    // Cross-sections also catch a thin pole between probes or a stationary aircraft touching it.
+    for(const points of [before,after])for(const [a,b] of [[0,1],[2,3],[4,5]])segments.push([points[a],points[b]]);
+    const all=[...before,...after],lo=[0,1,2].map(k=>Math.min(...all.map(p=>p[k]))),hi=[0,1,2].map(k=>Math.max(...all.map(p=>p[k])));
+    const islands=f.islands||[{map:root.SkyCore.MAPS.find(m=>m.id===f.map)||root.SkyCore.MAPS[0],x:0,z:0}];
+    for(const isle of islands){
+      const ox=isle.x||0,oz=isle.z||0;
+      if(hi[0]<ox-10000||lo[0]>ox+10000||hi[2]<oz-10000||lo[2]>oz+10000)continue;
+      const cells=collisionIndex(isle),candidates=new Set();
+      for(let x=Math.floor((lo[0]-ox)/COLLISION_CELL);x<=Math.floor((hi[0]-ox)/COLLISION_CELL);x++)for(let z=Math.floor((lo[2]-oz)/COLLISION_CELL);z<=Math.floor((hi[2]-oz)/COLLISION_CELL);z++)for(const item of cells.get(x+','+z)||[])candidates.add(item);
+      const local=segments.map(s=>s.map(p=>[p[0]-ox,p[1],p[2]-oz]));
+      const localSwept=swept.map(t=>t.map(p=>[p[0]-ox,p[1],p[2]-oz]));
+      for(const item of candidates){
+        if(item.hi[1]<lo[1]||item.lo[1]>hi[1]||item.hi[0]<lo[0]-ox||item.lo[0]>hi[0]-ox||item.hi[2]<lo[2]-oz||item.lo[2]>hi[2]-oz)continue;
+        if(local.some(s=>segmentTriangle(s[0],s[1],item.tri)))return true;
+        // A thin obstacle can lie between wing probes during a fast frame.
+        for(let i=0;i<3;i++)if(localSwept.some(t=>segmentTriangle(item.tri[i],item.tri[(i+1)%3],t)))return true;
+      }
+    }
+    return false;
+  }
   class Renderer{
     constructor(canvas){this.canvas=canvas;this.ctx=canvas.getContext('2d',{alpha:false});this.world=[];this.signature='';this.quality='low';this.frame=0;this.clouds=[];this.width=0;this.height=0;this.planeColor='';}
     resize(quality){
@@ -489,5 +543,5 @@
     }
     for(const isle of islands){const lw=Math.max(1.5,3*scale/.024),a=pos(isle.x,isle.z-isle.runwayHalf),b=pos(isle.x,isle.z+isle.runwayHalf);ctx.lineCap='butt';ctx.strokeStyle='#24332f';ctx.lineWidth=lw+1.5;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();ctx.strokeStyle='#eef3d8';ctx.lineWidth=Math.max(.8,lw*.45);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();}if(islands.length>1){ctx.font=`${Math.max(8,Math.round(w/22))}px monospace`;ctx.textAlign='center';for(let i=0;i<islands.length;i++){const isle=islands[i],c=pos(isle.x,isle.z);if(scale<.0032&&i&&i!==flight.finish)continue;if(c[0]<-40||c[0]>w+40||c[1]<-10||c[1]>w+10)continue;const full=(isle.map.name||'').toUpperCase(),label=scale>=.0075?full:full.split(/[\s&]+/)[0],drop=Math.max(6,(isle.map.land?.[0]?.[3]||1350)*scale+9);ctx.fillStyle='#0e2a2499';const tw=ctx.measureText(label).width;ctx.fillRect(c[0]-tw/2-2,c[1]+drop-8,tw+4,10);ctx.fillStyle=i===0?'#f4e7a8':i===flight.finish&&flight.finish>0?'#c7f0a2':'#e2ecd0';ctx.fillText(label,c[0],c[1]+drop);}}
     ctx.strokeStyle='#acc49777';ctx.lineWidth=1;ctx.beginPath();flight.gates.forEach((g,i)=>{const p=pos(g.x,g.z);if(!i)ctx.moveTo(...p);else ctx.lineTo(...p);});ctx.stroke();flight.gates.forEach((g,i)=>{ctx.fillStyle=i<flight.gate?'#607f59':i===flight.gate?'#e8f7a6':'#9ab989';ctx.beginPath();ctx.arc(...pos(g.x,g.z),i===flight.gate?4:2,0,TAU);ctx.fill();});if(flight.ghost&&!flight.ghost.finished){ctx.fillStyle='#7fc4d8';ctx.beginPath();ctx.arc(...pos(flight.ghost.x,flight.ghost.z),3,0,TAU);ctx.fill();}const p=pos(flight.x,flight.z);ctx.save();ctx.translate(...p);ctx.rotate(flight.yaw);ctx.fillStyle='#fff9e1';ctx.beginPath();ctx.moveTo(0,-6);ctx.lineTo(-4,5);ctx.lineTo(0,2);ctx.lineTo(4,5);ctx.fill();ctx.restore();ctx.font='9px monospace';ctx.fillStyle='#cbd9b6';ctx.textAlign='left';ctx.fillText('N ↑',10,16);ctx.fillText((flight.mapLabel||'SEABREEZE').slice(0,16),10,w-10);if(flight.mapNote){ctx.textAlign='right';ctx.fillText(flight.mapNote.slice(0,12),w-8,16);}}
-  root.SkyWorld={Renderer,drawMap,coastFor,topDownFor,buildWorld};
+  root.SkyWorld={Renderer,drawMap,coastFor,topDownFor,buildWorld,sceneryCollision};
 })(globalThis);

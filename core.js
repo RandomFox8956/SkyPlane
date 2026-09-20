@@ -416,7 +416,7 @@
   function stepFlight(f, controls, dt, settings) {
     if (f.crashed || f.completed) return [];
     const events=[]; f.time+=dt;
-    const p0={x:f.x,y:f.y,z:f.z};
+    const p0={x:f.x,y:f.y,z:f.z,yaw:f.yaw,pitch:f.pitch,roll:f.roll};
     const windStrength=settings.weather==='storm'?12:settings.weather==='overcast'?4:0;
     const windX=windStrength*(.6+Math.sin(f.time*.17)*.4);
     const windZ=windStrength*Math.cos(f.time*.13)*.3;
@@ -469,6 +469,11 @@
       f.y=2;f.vy=Math.max(0,f.vy);f.onGround=true;f.pitch=Math.max(0,f.pitch);
       if(f.onGround&&!f.airborne&&(!runway&&f.speed>15)){f.crashed=true;events.push({type:'crash',reason:'The aircraft left the runway during takeoff. Use gentle steering.'});}
     }
+    // Sweep against the same static meshes used to draw every island, before rewards/gates.
+    if(!f.crashed&&root.SkyWorld?.sceneryCollision(f,p0)){
+      f.crashed=true;events.push({type:'crash',reason:'You hit scenery. Keep the fuselage and wings clear of buildings, trees, and parked aircraft.'});
+      f.verticalSpeed=f.onGround?0:f.vy;return events;
+    }
     if(f.type==='cargo'&&!f.onGround){f.cargo=Math.max(0,f.cargo-Math.max(0,Math.abs(f.roll)-.62)*dt*2.5-Math.max(0,Math.abs(ay)-5)*dt*.12);}
     const gate=f.gates[f.gate];
     if(gate&&f.airborne){
@@ -501,4 +506,3 @@
   const api={STAFF,BUILDINGS,MISSIONS,ROLES,DESTINATIONS,MODES,SOLO_MODES,TERRAINS,MAPS,EQUIPPED,GHOST_RATE,clamp,worldName,worldMode,worldTerrain,worldMap,currentMap,mapsFor,mountainsFor,terrainHeight,lowGroundPath,homeLayout,freeLayout,flightLayout,pickDestination,runwayAt,freshState,sanitize,sanitizeRecord,sampleGhost,ghostAt,entry,spend,price,build,hire,wageRate,difficulty,tickEconomy,completeTask,makeRoute,newFlight,stepFlight,rewardFlight};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.SkyCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);
-
