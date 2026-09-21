@@ -35,6 +35,22 @@
     if(plant==='snowpine'){pyramid(mesh,x,13*scale,z,16*scale,40*scale,'#4f6e63',5,1);pyramid(mesh,x,30*scale,z,12*scale,30*scale,'#e9efeb',5,1);return;}
     pyramid(mesh,x,13*scale,z,16*scale,40*scale,'#497b59',5,1);pyramid(mesh,x,30*scale,z,12*scale,30*scale,'#64865b',5,1);
   }
+  // One runway strip built at the origin heading north (pavement, centreline, edge lines, edge lights
+  // and threshold bars). `ws` scales the width so the angled runways can be a little narrower than the
+  // main one. The caller rotates and positions it with transformed().
+  function runwayStrip(half,ws=1){
+    const m=[];
+    box(m,0,1,0,77*ws,1,half*2+15,'#d1c6a2');box(m,0,2,0,61*ws,.5,half*2,'#64726d');
+    for(let z=-half+65;z<half-30;z+=95)box(m,0,2.65,z,2,.1,37,'#eae8cd');
+    for(let side of [-1,1]){
+      box(m,side*27*ws,2.6,0,1,.1,half*2-25,'#cfd6ba');
+      // Edge lights are flat markers (kept at ground height) so that where runways cross, one runway's
+      // lights can never become an obstacle on another runway's landing rollout.
+      for(let z=-half+55;z<half;z+=90)box(m,side*36*ws,2.7,z,3,.1,3,'#ffe3a1',1);
+      for(let i=0;i<4;i++){box(m,side*(7+i*5)*ws,2.7,half-65,2,.1,45,'#f1efdb');box(m,side*(7+i*5)*ws,2.7,-half+65,2,.1,45,'#f1efdb');}
+    }
+    return m;
+  }
   function hangar(mesh,x,z,scale=1){
     box(mesh,x,2,z,126*scale,49*scale,110*scale,'#ccd0b0');
     box(mesh,x,2,z+55*scale,105*scale,41*scale,1,'#526d67');
@@ -134,7 +150,10 @@
     if(COAST_CACHE[map.id])return COAST_CACHE[map.id];
     let s=2166136261;for(let i=0;i<map.id.length;i++){s^=map.id.charCodeAt(i);s=Math.imul(s,16777619)>>>0;}
     const rnd=()=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};
-    const KEEP={x:280,z:0,rx:720,rz:1680};
+    // The dry "keep" zone must cover the whole runway complex (a circle of runways on the western side,
+    // which may be spun to any orientation) as well as the terminal, apron, tower and hangars to the
+    // east, so none of them ever end up over water on the smaller maps.
+    const KEEP={x:-300,z:0,rx:1100,rz:1450};
     const keepRadius=(cx,cz,a)=>{ // distance from (cx,cz) along angle a to the keep ellipse edge
       const dx=Math.cos(a),dz=Math.sin(a),ox=cx-KEEP.x,oz=cz-KEEP.z;
       const A=(dx/KEEP.rx)**2+(dz/KEEP.rz)**2,B=2*(ox*dx/KEEP.rx**2+oz*dz/KEEP.rz**2),Cc=(ox/KEEP.rx)**2+(oz/KEEP.rz)**2-1;
@@ -226,14 +245,15 @@
       if(d.hill)pyramid(m,d.x,-7,d.z,d.r,d.h,T.hill,7);
       else mountain(m,T,d.x,d.z,d.r,d.h,d.color,d.mesa);
     }
-    const half=850+buildings.runway*150;
-    box(m,0,1,0,77,1,half*2+15,'#d1c6a2');box(m,0,2,0,61,.5,half*2,'#64726d');
-    for(let z=-half+65;z<half-30;z+=95)box(m,0,2.65,z,2,.1,37,'#eae8cd');
-    for(let side of [-1,1]){
-      box(m,side*27,2.6,0,1,.1,half*2-25,'#cfd6ba');
-      for(let z=-half+55;z<half;z+=90)box(m,side*36,3,z,3,2,3,'#ffe3a1',1);
-      for(let i=0;i<4;i++){box(m,side*(7+i*5),2.7,half-65,2,.1,45,'#f1efdb');box(m,side*(7+i*5),2.7,-half+65,2,.1,45,'#f1efdb');}
-    }
+    // The runway complex: the straight runway 36 plus the angled runways, each placed and rotated onto
+    // its own heading. The straight runway keeps its original position, so the classic view is unchanged.
+    const runways=root.SkyCore?.runwaysFor?.({x:0,z:0,buildings,map})||[{cx:0,cz:0,rad:0,cos:1,sin:0,width:61,half:600+buildings.runway*150}];
+    for(const rw of runways)m.push(...transformed(runwayStrip(rw.half,rw.width/61),rw.cx,0,rw.cz,rw.rad));
+    // True when a point (island-local) lies on any runway's pavement (used for the boat).
+    const onRunway=(x,z)=>runways.some(rw=>{const dx=x-rw.cx,dz=z-rw.cz,lx=rw.cos*dx+rw.sin*dz,lz=-rw.sin*dx+rw.cos*dz;return Math.abs(lx)<rw.width/2+40&&Math.abs(lz)<rw.half+40;});
+    // True inside a runway's clear corridor — the pavement plus room to the sides and a long approach /
+    // departure zone off each end — so trees and cabins never grow into a takeoff or landing path.
+    const inCorridor=(x,z)=>runways.some(rw=>{const dx=x-rw.cx,dz=z-rw.cz,lx=rw.cos*dx+rw.sin*dz,lz=-rw.sin*dx+rw.cos*dz;return Math.abs(lx)<rw.width/2+120&&Math.abs(lz)<rw.half+650;});
     // Taxiways, apron, roads and service markings.
     box(m,175,1.7,310,310,.5,54,'#a8af95');box(m,277,1.8,10,280,.5,590,'#b7baa1');
     box(m,180,2.5,310,315,.1,1,'#f0d279',1);
@@ -259,18 +279,19 @@
     const trees=map.trees??T.trees,plant=map.plant||T.plant;
     for(let i=0,tries=0;i<trees&&tries<trees*6;tries++){
       const [cx,cz,rx,rz]=map.land[Math.floor(random()*map.land.length)],x=cx+(random()-.5)*rx*1.7,z=cz+(random()-.5)*rz*1.7;
-      if(!onLand(map,x,z)||Math.abs(x)<100&&Math.abs(z)<1400||x>90&&x<680&&z>-860&&z<560)continue;
+      if(!onLand(map,x,z)||inCorridor(x,z)||x>90&&x<680&&z>-860&&z<560)continue;
       i++;tree(m,x,z,.55+random()*.7,plant);
     }
     if(map.grove){const [gx,gz,gr]=map.grove;for(let i=0;i<26;i++){const a=i/26*TAU+random()*.2,r=gr*(.75+random()*.3);tree(m,gx+Math.cos(a)*r,gz+Math.sin(a)*r*.8,.8+random()*.5,plant);}face(m,[[gx-gr*.5,-1,gz-gr*.35],[gx+gr*.5,-1,gz-gr*.35],[gx+gr*.55,-1,gz+gr*.35],[gx-gr*.55,-1,gz+gr*.35]],'#6fb3b8');}
     // Cabins and windsock.
-    if(map.cabins){const [hx,hz]=map.cabins;for(let i=0;i<6;i++){const x=hx-i*46,z=hz+(i%2)*65;if(!onLand(map,x,z))continue;box(m,x,2,z,32,22,34,'#e3d5af',1);pyramid(m,x,24,z,28,15,'#9c8570',4,1);}}
+    if(map.cabins){const [hx,hz]=map.cabins;for(let i=0;i<6;i++){const x=hx-i*46,z=hz+(i%2)*65;if(!onLand(map,x,z)||inCorridor(x,z))continue;box(m,x,2,z,32,22,34,'#e3d5af',1);pyramid(m,x,24,z,28,15,'#9c8570',4,1);}}
     box(m,-92,2,560,2,37,2,'#d2d6b9');face(m,[[-92,37,560],[-68,33,562],[-68,36,565],[-92,42,564]],'#e7ae71');
     // Parked aircraft at stands; enlarged modestly for the airport overview.
     m.push(...transformed(planeMesh(skin,'passenger'),220,6,120,Math.PI/2,0,0,3.2));
     m.push(...transformed(planeMesh('#cbd9bf','cargo'),205,6,-15,Math.PI/2,0,0,3.2));
-    // Rescue boat wherever the map puts open water.
-    if(map.boat){const [bx,bz]=map.boat;box(m,bx,-3,bz,12,5,36,'#e4d6ad');box(m,bx,2,bz+3,7,7,14,'#f7efda');box(m,bx,9,bz+3,1,8,1,'#667a6b');}
+    // Rescue boat wherever the map puts open water — but only if that spot is still water (the wider
+    // airport zone turns some old boat moorings into land, and a boat must never sit among the runways).
+    if(map.boat&&!onLand(map,map.boat[0],map.boat[1])&&!onRunway(map.boat[0],map.boat[1])){const [bx,bz]=map.boat;box(m,bx,-3,bz,12,5,36,'#e4d6ad');box(m,bx,2,bz+3,7,7,14,'#f7efda');box(m,bx,9,bz+3,1,8,1,'#667a6b');}
     shapes=null;
     for(const f of m)if(f.v.every(p=>p[1]<=3))f.ground=Math.max(...f.v.map(p=>p[1]));
     if(ox||oz)for(const f of m)f.v=f.v.map(p=>[p[0]+ox,p[1],p[2]+oz]);
@@ -541,7 +562,7 @@
       if(side<4){const p=pos(isle.x,isle.z);ctx.fillStyle=IT.map[1];ctx.beginPath();ctx.arc(p[0],p[1],1.6,0,TAU);ctx.fill();continue;}
       const p=pos(isle.x-td.extent,isle.z-td.extent);ctx.imageSmoothingEnabled=true;ctx.drawImage(td.canvas,p[0],p[1],side,side);
     }
-    for(const isle of islands){const lw=Math.max(1.5,3*scale/.024),a=pos(isle.x,isle.z-isle.runwayHalf),b=pos(isle.x,isle.z+isle.runwayHalf);ctx.lineCap='butt';ctx.strokeStyle='#24332f';ctx.lineWidth=lw+1.5;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();ctx.strokeStyle='#eef3d8';ctx.lineWidth=Math.max(.8,lw*.45);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();}if(islands.length>1){ctx.font=`${Math.max(8,Math.round(w/22))}px monospace`;ctx.textAlign='center';for(let i=0;i<islands.length;i++){const isle=islands[i],c=pos(isle.x,isle.z);if(scale<.0032&&i&&i!==flight.finish)continue;if(c[0]<-40||c[0]>w+40||c[1]<-10||c[1]>w+10)continue;const full=(isle.map.name||'').toUpperCase(),label=scale>=.0075?full:full.split(/[\s&]+/)[0],drop=Math.max(6,(isle.map.land?.[0]?.[3]||1350)*scale+9);ctx.fillStyle='#0e2a2499';const tw=ctx.measureText(label).width;ctx.fillRect(c[0]-tw/2-2,c[1]+drop-8,tw+4,10);ctx.fillStyle=i===0?'#f4e7a8':i===flight.finish&&flight.finish>0?'#c7f0a2':'#e2ecd0';ctx.fillText(label,c[0],c[1]+drop);}}
+    for(const isle of islands){const lw=Math.max(1.5,3*scale/.024);const rws=root.SkyCore?.runwaysFor?.(isle)||[{cx:0,cz:0,cos:1,sin:0,half:isle.runwayHalf}];for(const rw of rws){const ex=(lx,lz)=>root.SkyCore?.runwayToWorld?root.SkyCore.runwayToWorld(isle,rw,lx,lz):{x:isle.x+lx,z:isle.z+lz};const e0=ex(0,-rw.half),e1=ex(0,rw.half),a=pos(e0.x,e0.z),b=pos(e1.x,e1.z);ctx.lineCap='butt';ctx.strokeStyle='#24332f';ctx.lineWidth=lw+1.5;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();ctx.strokeStyle='#eef3d8';ctx.lineWidth=Math.max(.8,lw*.45);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();}}if(islands.length>1){ctx.font=`${Math.max(8,Math.round(w/22))}px monospace`;ctx.textAlign='center';for(let i=0;i<islands.length;i++){const isle=islands[i],c=pos(isle.x,isle.z);if(scale<.0032&&i&&i!==flight.finish)continue;if(c[0]<-40||c[0]>w+40||c[1]<-10||c[1]>w+10)continue;const full=(isle.map.name||'').toUpperCase(),label=scale>=.0075?full:full.split(/[\s&]+/)[0],drop=Math.max(6,(isle.map.land?.[0]?.[3]||1350)*scale+9);ctx.fillStyle='#0e2a2499';const tw=ctx.measureText(label).width;ctx.fillRect(c[0]-tw/2-2,c[1]+drop-8,tw+4,10);ctx.fillStyle=i===0?'#f4e7a8':i===flight.finish&&flight.finish>0?'#c7f0a2':'#e2ecd0';ctx.fillText(label,c[0],c[1]+drop);}}
     ctx.strokeStyle='#acc49777';ctx.lineWidth=1;ctx.beginPath();flight.gates.forEach((g,i)=>{const p=pos(g.x,g.z);if(!i)ctx.moveTo(...p);else ctx.lineTo(...p);});ctx.stroke();flight.gates.forEach((g,i)=>{ctx.fillStyle=i<flight.gate?'#607f59':i===flight.gate?'#e8f7a6':'#9ab989';ctx.beginPath();ctx.arc(...pos(g.x,g.z),i===flight.gate?4:2,0,TAU);ctx.fill();});if(flight.ghost&&!flight.ghost.finished){ctx.fillStyle='#7fc4d8';ctx.beginPath();ctx.arc(...pos(flight.ghost.x,flight.ghost.z),3,0,TAU);ctx.fill();}const p=pos(flight.x,flight.z);ctx.save();ctx.translate(...p);ctx.rotate(flight.yaw);ctx.fillStyle='#fff9e1';ctx.beginPath();ctx.moveTo(0,-6);ctx.lineTo(-4,5);ctx.lineTo(0,2);ctx.lineTo(4,5);ctx.fill();ctx.restore();ctx.font='9px monospace';ctx.fillStyle='#cbd9b6';ctx.textAlign='left';ctx.fillText('N ↑',10,16);ctx.fillText((flight.mapLabel||'SEABREEZE').slice(0,16),10,w-10);if(flight.mapNote){ctx.textAlign='right';ctx.fillText(flight.mapNote.slice(0,12),w-8,16);}}
   root.SkyWorld={Renderer,drawMap,coastFor,topDownFor,buildWorld,sceneryCollision};
 })(globalThis);

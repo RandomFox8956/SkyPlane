@@ -47,12 +47,14 @@ Every world is created with a name, a play mode, and a world type. Mode and type
 
 ### Flying between islands
 
-In business and flight-only worlds the passenger, cargo, and emergency missions are **crossings**: the game generates your island plus one random other island 10–12 km away and routes you across the water into a proper approach on its runway 36 (the route steers around high ground automatically). Training, the air rally, and the coastline patrol remain circuits around the island you are on.
+In business and flight-only worlds the passenger, cargo, and emergency missions are **crossings**: the game generates your island plus one random other island 10–12 km away and routes you across the water into a proper approach on the destination's matching runway (the route steers around high ground automatically). Training, the air rally, and the coastline patrol remain circuits around the island you are on.
 
 - **Flight only:** after landing you are parked on that island. Your next flights start there — circuits fly around it, crossings go on to yet another island — and a **Homeward bound** flight on the mission list takes you back to your own island.
 - **Business:** you only fly out; the next flight always starts back at your own airport.
 
-There are **20 maps** in four world types, five per type. Every map has its own landmasses, mountains or mesas, vegetation, airport setting, and a distinct race circuit with its own default track. The runway is always runway 36 and the flight rules never change.
+There are **20 maps** in four world types, five per type. Every map has its own landmasses, mountains or mesas, vegetation, airport setting, and a distinct race circuit with its own default track. Every airport has **three runways** — two vertical (north–south) and one horizontal (east–west) — laid out in a **different position on each island** (at most one pair ever crosses). Each mission departs and lands on the runway assigned to it. The flight rules never change.
+
+**Which mission uses which runway:** training, the air rally, homeward legs, and the solo (competitive / free-flight) modes use **runway 0** (a vertical runway — the one the runway-extension building lengthens). Passenger and emergency flights use the **second vertical runway**; cargo and military patrol use the **horizontal runway**. Crossings land on the matching runway at the destination, and the in-game briefings and flight display always name the exact runway (e.g. "Land on runway 27") for the island you are flying to.
 
 | World type | Maps |
 | --- | --- |
@@ -69,7 +71,7 @@ There are **20 maps** in four world types, five per type. Every map has its own 
 - Expand terminals, hangars, runway length, radar, fuel storage, and emergency facilities. Each expansion changes the economy or flight rewards and adds to the 3D airport.
 - Hire and dismiss staff. Flights pass through check-in, security, ground handling, and boarding. Missing staff create real bottlenecks.
 - Switch between manager, pilot, check-in receptionist, security guard, cabin crew, ground crew, and engineer. Service roles have rotating interactive tasks; correct answers pay bonuses and relevant tasks advance waiting flights.
-- Fly training, passenger, fragile cargo, unarmed military patrol, medical-delivery, and time-trial racing missions. Follow navigation gates, land on runway 36 (yours or a neighbouring island's), and brake to collect the mission reward.
+- Fly training, passenger, fragile cargo, unarmed military patrol, medical-delivery, and time-trial racing missions. Follow navigation gates, land on your mission's runway (yours or a neighbouring island's), and brake to collect the mission reward.
 - Choose aircraft paint, clear skies, overcast, storms, or golden hour; design a race route; switch between chase, cockpit, and cinematic cameras; watch a replay of the last 60 seconds.
 - Read eight tutorial lessons plus a full controls guide.
 - Save locally and export/import JSON backups to move your airport between computers.
