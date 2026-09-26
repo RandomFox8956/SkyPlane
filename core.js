@@ -20,12 +20,12 @@
   };
   const MISSIONS = {
     training: { title: 'Your first solo', category: 'FLIGHT SCHOOL', description: 'Learn to taxi, take off, follow a gentle circuit, and land back on the island.', reward: 1200, duration: '5–8 MIN', icon: 'book', label: 'Guided circuit', aircraft: 'Kestrel 172', gates: 4 },
-    passenger: { title: 'The island connection', category: 'PASSENGER', description: 'Carry your passengers across the water to a neighbouring island and land on its runway 36.', reward: 2600, duration: '5–8 MIN', icon: 'users', label: 'Island hop', aircraft: 'Comet 320', gates: 5, destination: true },
+    passenger: { title: 'The island connection', category: 'PASSENGER', description: 'Carry your passengers across the water to a neighbouring island and land on its assigned runway, and taxi to the arrival gate.', reward: 2600, duration: '5–8 MIN', icon: 'users', label: 'Island hop', aircraft: 'Comet 320', gates: 5, destination: true },
     cargo: { title: 'Precious cargo', category: 'CARGO', description: 'Deliver delicate research equipment to a neighbouring island. Steep banks and hard landings damage the shipment.', reward: 3100, duration: '5–8 MIN', icon: 'box', label: 'Fragile delivery', aircraft: 'Hauler 208', gates: 5, destination: true },
     military: { title: 'Coastline patrol', category: 'MILITARY', description: 'Fly an unarmed patrol and inspect coastal waypoints. Stay within the marked surveillance corridors.', reward: 2800, duration: '6–9 MIN', icon: 'shield', label: 'Coastal reconnaissance', aircraft: 'Sentinel T6', gates: 6 },
     emergency: { title: 'A helping wing', category: 'EMERGENCY', description: 'Rush medical supplies to a neighbouring island. Prepare for reduced engine power halfway across the water.', reward: 3500, duration: '5–8 MIN', icon: 'shield', label: 'Medical delivery', aircraft: 'Rescue Caravan', gates: 5, destination: true },
     'return': { title: 'Homeward bound', category: 'RETURN FLIGHT', description: 'Fly back across the water to your own island and land on your home runway.', reward: 0, duration: '4–7 MIN', icon: 'arrow', label: 'Fly home', aircraft: 'Comet 320', gates: 5, destination: true },
-    race: { title: 'Seabreeze air rally', category: 'AIR RACING', description: 'Race the clock through floating gates. Real lift, drag, and stall physics still apply. Land to finish.', reward: 3000, duration: '5–9 MIN', icon: 'plane', label: 'Timed circuit', aircraft: 'Swift R3', gates: 8 }
+    race: { title: 'Seabreeze air rally', category: 'AIR RACING', description: 'Race the clock through floating gates. Real lift, drag, and stall physics still apply. Park at the arrival gate to finish.', reward: 3000, duration: '5–9 MIN', icon: 'plane', label: 'Timed circuit', aircraft: 'Swift R3', gates: 8 }
   };
   const ROLES = {
     manager: { name: 'Airport manager', short: 'Manager', initial: 'M', description: 'Set the strategy. Build, hire, and balance the books.', icon: 'chart' },
@@ -119,7 +119,7 @@
   // hangars and parked aircraft all sit to the east): two vertical (north–south) runways and one
   // horizontal (east–west) runway. Their orientations are fixed, but their positions are generated per
   // island from a seed on the map id, so no two islands lay their runways out the same way. The generator
-  // keeps every runway on dry land, clear of the buildings, spaced apart, and lets at most one pair cross.
+  // keeps every runway on dry land, clear of the buildings, and fully separated so no two pavements overlap.
   // The horizontal runway is always placed north or south of the buildings so its east–west approaches
   // never pass over them. Runway 0 (a vertical one) is the one the runway-extension building lengthens.
   const RW_SPECS=[
@@ -129,11 +129,6 @@
   ];
   // Standard runway designator from a heading: the tens of the magnetic bearing (north = 36).
   function runwayName(deg){let h=((deg%360)+360)%360,n=Math.round(h/10)%36;if(n===0)n=36;return String(n).padStart(2,'0');}
-  // Do two line segments (runway centrelines) cross?
-  function segCross(a,b,c,d){
-    const s=(p,q,r)=>Math.sign((q.x-p.x)*(r.z-p.z)-(q.z-p.z)*(r.x-p.x));
-    return s(a,b,c)!==s(a,b,d) && s(c,d,a)!==s(c,d,b);
-  }
   // The buildings occupy this island-local box (terminal, apron, tower, hangars, parked aircraft).
   const BUILD_BOX={x0:90,x1:720,z0:-780,z1:480};
   function inBuildBox(x,z){ return x>BUILD_BOX.x0 && x<BUILD_BOX.x1 && z>BUILD_BOX.z0 && z<BUILD_BOX.z1; }
@@ -163,13 +158,28 @@
     const ext=(isle.buildings&&isle.buildings.runway)||0;
     const map=isle.map||null;
     const rng=seededRandom((map?map.id:'default')+'/runways3');
-    const placed=[]; let crossingsUsed=0;
-    const segOf=(cx,cz,rad,half)=>{const fx=Math.sin(rad),fz=-Math.cos(rad);return [{x:cx-fx*half,z:cz-fz*half},{x:cx+fx*half,z:cz+fz*half}];};
-    const fits=(cx,cz,rad,half)=>{ // spacing + at-most-one-crossing test against what's placed
-      const seg=segOf(cx,cz,rad,half); let crosses=0;
-      for(const p of placed){ if(Math.hypot(cx-p.cx,cz-p.cz)<430)return null; if(segCross(seg[0],seg[1],p.seg[0],p.seg[1]))crosses++; }
-      return (crossingsUsed+crosses>1) ? null : {cx,cz,deg:rad*180/Math.PI,rad,half,seg,cross:crosses};
+    const placed=[];
+    // Oriented-rectangle (SAT) overlap test so no two runway pavements ever touch. Each runway is a
+    // rectangle 2*half long and `width` wide; a margin keeps a clear buffer of grass between strips.
+    const overlaps=(cx,cz,rad,half,width)=>{
+      const m=90, along={x:Math.sin(rad),z:-Math.cos(rad)}, across={x:Math.cos(rad),z:Math.sin(rad)};
+      const ha=half+m, wa=width/2+m;
+      for(const p of placed){
+        const pAlong={x:Math.sin(p.rad),z:-Math.cos(p.rad)}, pAcross={x:Math.cos(p.rad),z:Math.sin(p.rad)};
+        const hb=p.half+m, wb=p.width/2+m, dx=p.cx-cx, dz=p.cz-cz;
+        let separated=false;
+        for(const L of [along,across,pAlong,pAcross]){
+          const rA=Math.abs(along.x*L.x+along.z*L.z)*ha+Math.abs(across.x*L.x+across.z*L.z)*wa;
+          const rB=Math.abs(pAlong.x*L.x+pAlong.z*L.z)*hb+Math.abs(pAcross.x*L.x+pAcross.z*L.z)*wb;
+          if(Math.abs(dx*L.x+dz*L.z)>rA+rB){separated=true;break;}
+        }
+        if(!separated)return true; // no separating axis found → the pavements overlap
+      }
+      return false;
     };
+    // A placement fits only when its pavement clears every runway already placed.
+    const fits=(cx,cz,rad,half,width)=> overlaps(cx,cz,rad,half,width) ? null
+      : {cx,cz,deg:rad*180/Math.PI,rad,half,width};
     // A candidate centre for a spec: verticals sit anywhere in the western band; the horizontal sits
     // clearly north or south of the buildings so its approaches stay off them.
     const sample=(spec)=> spec.dir==='horizontal'
@@ -180,22 +190,25 @@
       let chosen=null;
       for(let attempt=0;attempt<900 && !chosen;attempt++){
         const {cx,cz}=sample(spec);
-        if(runwaySafe(map,cx,cz,rad,half))chosen=fits(cx,cz,rad,half);
+        if(runwaySafe(map,cx,cz,rad,half))chosen=fits(cx,cz,rad,half,spec.width);
       }
       // Fallback: scan a grid of centres (with this runway's fixed heading) for the first safe placement.
       if(!chosen){
-        const xs=[-1100,-850,-600,-350], zs=spec.dir==='horizontal'?[-1200,-1000,750,950]:[0,-200,200,-350,350];
+        const xs=[-1150,-950,-750,-550,-350], zs=spec.dir==='horizontal'?[-1300,-1100,-900,700,900,1100]:[0,-200,200,-400,400,-600,600];
         outer:
         for(const cx of xs)for(const cz of zs){
           if(!runwaySafe(map,cx,cz,rad,half))continue;
-          const c=fits(cx,cz,rad,half);
+          const c=fits(cx,cz,rad,half,spec.width);
           if(c){chosen=c;break outer;}
         }
       }
-      // Last resort: a fixed clear lane for this orientation.
-      if(!chosen){const cx=spec.dir==='horizontal'?-650:(placed.length?-780:-330),cz=spec.dir==='horizontal'?-1050:0;chosen={cx,cz,deg:spec.deg,rad,half,seg:segOf(cx,cz,rad,half),cross:0};}
+      // Last resort: try a set of well-separated fixed lanes, then accept the first that clears the rest.
+      if(!chosen){
+        const lanes=spec.dir==='horizontal'?[[-650,-1150],[-650,950],[-500,-1300]]:[[-330,0],[-800,0],[-560,-400],[-560,400]];
+        for(const [cx,cz] of lanes){const c=fits(cx,cz,rad,half,spec.width);if(c){chosen=c;break;}}
+        if(!chosen){const cx=spec.dir==='horizontal'?-650:(placed.length?-800:-330),cz=spec.dir==='horizontal'?-1150:0;chosen={cx,cz,deg:spec.deg,rad,half,width:spec.width};}
+      }
       chosen.width=spec.width;
-      crossingsUsed+=chosen.cross;
       placed.push(chosen);
     });
     return isle._rws=placed.map((p,i)=>({ index:i, name:runwayName(p.deg), cx:p.cx, cz:p.cz, deg:p.deg, rad:p.rad,
@@ -235,22 +248,16 @@
     if(destination&&MAP_BY_ID[destination.map])layout.push(island(MAP_BY_ID[destination.map],destination.dx,destination.dz,destination.map===s.world.map?s.buildings:EQUIPPED));
     return layout;
   }
-  const GATE_CLEARANCE=140;
-  function clearAbove(where,a,b){
-    let top=0;const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1,nx=-dz/len*130,nz=dx/len*130,steps=Math.max(2,Math.ceil(len/60));
-    for(let i=0;i<=steps;i++){const t=i/steps,x=a.x+dx*t,z=a.z+dz*t;for(const k of [-1,0,1])top=Math.max(top,terrainHeight(where,x+nx*k,z+nz*k));}
-    return top>0?top+GATE_CLEARANCE:0;
-  }
-  function worldMap(options){ if(options&&Object.hasOwn(MAP_BY_ID,options.map))return MAP_BY_ID[options.map]; return mapsFor(worldTerrain(options?.terrain))[0]; }
+  function worldMap(world={}){return MAP_BY_ID[world.map]||mapsFor(worldTerrain(world.terrain))[0];}
   function freshState(options={}) {
     const mode=worldMode(options), business=mode==='business', solo=SOLO_MODES.includes(mode), map=worldMap(options);
-    const state={ version: 1, world:{name:worldName(options.name),tutorial:!solo&&options.tutorial!==false,business,mode,terrain:map.terrain,map:map.id}, trip:null, cash: 24000, seconds: 0, reputation: 82, passengers: 0, completed: 0, missions: 0, tasks: 0,
+    const state={ version: 1, routeVersion:2, visualVersion:2, world:{name:worldName(options.name),tutorial:!solo&&options.tutorial!==false,business,mode,terrain:map.terrain,map:map.id}, trip:null, cash: 24000, seconds: 0, reputation: 82, passengers: 0, completed: 0, missions: 0, tasks: 0,
       revenue: 0, expenses: 0, wages: 0, capital: 0, debt: 0, role: 'manager', skin: '#f0b85a',
       buildings: { terminal: 0, hangar: 0, runway: 0, radar: 0, fuel: 0, rescue: 0 },
       staff: { checkin: 1, security: 1, ground: 1, cabin: 0, engineer: 0 },
       departures: [newDeparture(1), newDeparture(2, 1)], nextFlight: 3,
       ledger: [{ label: 'Founder’s starting investment', amount: 24000, time: 0 }], history: [],
-      settings: { difficulty: 'easy', graphics: 'low', weather: 'clear', sound: false, touch: false, invert: false },
+      settings: { difficulty: 'easy', graphics: 'high', weather: 'clear', sound: false, touch: false, invert: false },
       course: { ...map.course },
       bestRace: 0, raceRecord: null, tutorialDone: false, milestone: false, taskReadyAt: 0, taskSequence: 0, emergencyGrant: false, lessonRead: [] };
     if(!business){state.cash=0;state.role='pilot';state.staff={checkin:0,security:0,ground:0,cabin:0,engineer:0};state.departures=[];state.ledger=[];state.buildings={terminal:2,hangar:1,runway:1,radar:1,fuel:1,rescue:1};}
@@ -268,6 +275,7 @@
     if (typeof raw.skin === 'string' && /^#[0-9a-f]{6}$/i.test(raw.skin)) s.skin = raw.skin;
     const choices = { difficulty: ['easy','normal','hard'], graphics: ['low','medium','high'], weather: ['clear','overcast','storm','sunset'] };
     for (const k in choices) if (choices[k].includes(raw.settings?.[k])) s.settings[k] = raw.settings[k];
+    if(raw.visualVersion!==2)s.settings.graphics='high';
     ['sound','touch','invert'].forEach(k => s.settings[k] = raw.settings?.[k] === true);
     ['tutorialDone','milestone','emergencyGrant'].forEach(k => s[k] = raw[k] === true);
     s.course.gates = Math.round(finite(raw.course?.gates, s.course.gates, 4, 12));
@@ -275,7 +283,8 @@
     s.course.altitude = finite(raw.course?.altitude, s.course.altitude, 120, 420);
     s.course.direction = raw.course?.direction === 'right' ? 'right' : raw.course?.direction === 'left' ? 'left' : s.course.direction;
     // Ghost traces only exist in competitive worlds.
-    s.raceRecord = s.world.mode === 'competitive' ? sanitizeRecord(raw.raceRecord) : null;
+    s.raceRecord = raw.routeVersion===2 && s.world.mode === 'competitive' ? sanitizeRecord(raw.raceRecord) : null;
+    if(raw.routeVersion!==2)s.bestRace=0;
     // A flight-only pilot may be parked on another island; business pilots always start at home.
     const t = raw.trip;
     s.trip = s.world.mode === 'flight' && t && typeof t === 'object' && Object.hasOwn(MAP_BY_ID, t.map) && t.map !== s.world.map && Number.isFinite(t.dx) && Number.isFinite(t.dz) ? { map: t.map, dx: clamp(t.dx, -1e6, 1e6), dz: clamp(t.dz, -1e6, 1e6) } : null;
@@ -332,7 +341,14 @@
     s.staff[key]++; return true;
   }
   function wageRate(s) { return Object.keys(STAFF).reduce((n,k)=>n+s.staff[k]*STAFF[k].wage,0); }
-  function difficulty(s) { return ({easy:{cost:.8, gate:100, damage:.55},normal:{cost:1,gate:75,damage:1},hard:{cost:1.2,gate:55,damage:1.4}})[s.settings.difficulty]; }
+  const FLIGHT_DIFFICULTY={
+    easy:{wind:.35,stability:.9,steering:.55,stallAngle:.38,stallSpeed:19,stallLift:.65,sink:7.5,landingRoll:.48,landingSpeed:75,runwayMargin:12,excursionGrace:3,autoRotate:true},
+    normal:{wind:1,stability:.32,steering:.8,stallAngle:.30,stallSpeed:23,stallLift:.38,sink:5,landingRoll:.30,landingSpeed:65,runwayMargin:3,excursionGrace:1.8,autoRotate:false},
+    hard:{wind:1.35,stability:.14,steering:1,stallAngle:.27,stallSpeed:25,stallLift:.28,sink:3.2,landingRoll:.20,landingSpeed:55,runwayMargin:0,excursionGrace:.8,autoRotate:false}
+  };
+  function flightDifficulty(settings){return FLIGHT_DIFFICULTY[settings?.difficulty]||FLIGHT_DIFFICULTY.normal;}
+  function difficulty(s) { return ({easy:{cost:.8, gate:100, damage:.55},normal:{cost:1,gate:75,damage:1},hard:{cost:1.2,gate:55,damage:1.4}})[s.settings.difficulty]||{cost:1,gate:75,damage:1}; }
+
   function tickEconomy(s, dt) {
     if(s.world?.business===false){s.seconds+=dt;return [];}
     const events = []; const oldHour = Math.floor(s.seconds/60);
@@ -368,164 +384,55 @@
     if (!s.milestone && s.completed >= 5) { s.milestone=true;s.cash+=2000;entry(s,'First five departures · milestone grant',2000);events.push({type:'milestone'}); }
     return events;
   }
-  function completeTask(s, role, correct) {
+  function completeTask(s, role, correct, grade=1) {
     if(s.world?.business===false)return false;
     if (s.seconds < s.taskReadyAt || !STAFF[role]) return false;
     s.taskReadyAt=s.seconds+12; s.taskSequence++;
     if (!correct) { s.reputation=clamp(s.reputation-1,0,100);return true; }
-    s.tasks++;s.cash+=120;s.revenue+=120;s.reputation=clamp(s.reputation+.5,0,100);entry(s,ROLES[role].name+' · shift bonus',120);
+    const pay=Math.round((60+grade*100)/5)*5;
+    s.tasks++;s.cash+=pay;s.revenue+=pay;s.reputation=clamp(s.reputation+(.15+grade*.5),0,100);entry(s,ROLES[role].name+' · shift bonus ('+(grade>=.93?'S':grade>=.82?'A':grade>=.66?'B':grade>=.48?'C':'D')+' grade)',pay);
     const stage = STAFF[role].stage;
     const flight = s.departures.find(x=>x.stage===stage);
     if (flight) { flight.wait=0;flight.progress+=.6;if(flight.progress>=1){flight.stage++;flight.progress=0;} }
     return true;
   }
-  // Race circuits start at the same takeoff gate north of runway 36; each shape fills in the middle.
-  const SHAPES = {
-    arc(n,R,H,sign){const g=[];for(let i=1;i<n;i++){const t=(i/(n-1))*Math.PI*1.62;g.push({x:sign*R*(1-Math.cos(t)),y:H+Math.sin(t*2)*55,z:-1050-R*Math.sin(t)});}return g;},
-    // A circle through the takeoff gate; "right" mirrors the circuit to the other side of the field.
-    loop(n,R,H,sign,map){const cx=sign*Math.abs(map.race.cx),cz=map.race.cz,r=Math.hypot(cx,cz+1050)*R/950,a0=Math.atan2(-1050-cz,-cx),g=[];for(let i=1;i<n;i++){const a=a0+sign*(i/n)*Math.PI*2;g.push({x:cx+Math.cos(a)*r,y:H+Math.sin(i/n*Math.PI*4)*30,z:cz+Math.sin(a)*r});}return g;},
-    // Two tangent circles crossed at a single point north of the field.
-    figure8(n,R,H,sign){const r=R*.68,cz=-1050-1.4*r,g=[{x:0,y:H,z:cz}],mA=Math.floor((n-2)/2),mB=n-2-mA;
-      for(let j=1;j<=mA;j++){const a=(1+sign)/2*Math.PI+sign*j/(mA+1)*Math.PI*2;g.push({x:sign*r+Math.cos(a)*r,y:H+Math.sin(j/(mA+1)*Math.PI*2)*35,z:cz+Math.sin(a)*r});}
-      for(let j=1;j<=mB;j++){const a=(1-sign)/2*Math.PI-sign*j/(mB+1)*Math.PI*2;g.push({x:-sign*r+Math.cos(a)*r,y:H-Math.sin(j/(mB+1)*Math.PI*2)*35,z:cz+Math.sin(a)*r});}return g;},
-    // Out along one lane, a wide turn at the far end, and back down the other lane.
-    slalom(n,R,H,sign){const g=[],L=R*2.6,m=n-2,out=Math.ceil(m/2),back=m-out;
-      for(let j=1;j<=out;j++)g.push({x:-sign*R*.5*Math.min(1,j/2)+(j%2?1:-1)*R*.07,y:H+(j%2?25:-15),z:-1050-L*j/out});
-      g.push({x:0,y:H+40,z:-1050-L-R*.55});
-      for(let j=1;j<=back;j++)g.push({x:sign*R*.5*Math.min(1,(back+1-j)/2)+(j%2?-1:1)*R*.07,y:H+(j%2?-15:25),z:-1050-L*(1-j/(back+1))});return g;},
-    // A climbing spiral that tightens towards a summit.
-    climb(n,R,H,sign,map){const cx=sign*Math.abs(map.race.cx),cz=map.race.cz,r=Math.max(R*.75,map.race.minR||0),a0=Math.atan2(-1050-cz,-cx),g=[];for(let i=1;i<n;i++){const k=i/(n-1),a=a0+sign*k*Math.PI*2;g.push({x:cx+Math.cos(a)*r,y:Math.min(760,H*.55+k*H*1.35),z:cz+Math.sin(a)*r});}return g;}
-  };
-  // Every mission follows the map's own circuit; races use the player's course, missions a fixed size.
-  function makeRoute(type, course, where=MAPS[0], homeRw=null, destRw=null) {
-    const layout = Array.isArray(where) ? where : [island(where,0,0,EQUIPPED)], map = layout[0].map, dest = layout[1];
-    const home = layout[0];
-    homeRw = homeRw || runwaysFor(home)[0];
-    if (MISSIONS[type]?.destination && dest) return liftRoute(layout, destinationRoute(layout, homeRw, destRw||runwaysFor(dest)[0]));
-    const race = type === 'race', base = map.course || COURSE;
-    const count = race ? course.gates : MISSIONS[type].gates;
-    let shape = map.race?.shape || 'arc', radius = race ? course.radius : base.radius, direction = race ? course.direction : base.direction;
-    // Short mission routes cannot follow a spiral safely: training flies the classic small arc and
-    // other missions circle wide around the map's centrepiece instead.
-    if (!race && type === 'training') { if (shape !== 'slalom') { shape = 'arc'; radius = 700; } else radius = Math.max(700, base.radius * .85); direction = map.trainingDirection || direction; }
-    else if (!race && shape === 'climb') { shape = 'loop'; radius = 950; }
-    const height = race ? course.altitude : type === 'training' ? 130 : 230;
-    const sign = direction === 'right' ? 1 : -1;
-    const gates = [{x:0,y:95,z:-1050}];
-    gates.push(...(SHAPES[shape]||SHAPES.arc)(count,radius,height,sign,map));
-    // A wide downwind leg followed by a straight final approach to the departure runway.
-    gates.push({x:sign*600,y:180,z:1550},{x:0,y:150,z:2250},{x:0,y:65,z:1250});
-    // The circuit is built around a straight runway at the origin; rotate and shift it onto the
-    // runway this mission actually uses (the classic runway 36 leaves it unchanged).
-    const world = gates.map(g=>{const w=runwayToWorld(home,homeRw,g.x,g.z);return {x:w.x,y:g.y,z:w.z};});
-    return liftRoute(layout, world);
+  const Navigation=typeof module!=='undefined'?require('./navigation.js'):root.SkyNavigation;
+  function makeRoute(type,course,where=MAPS[0],homeRw=null,destRw=null){
+    const layout=Array.isArray(where)?where:[island(where,0,0,EQUIPPED)],home=layout[0],rws=runwaysFor(home);
+    homeRw=homeRw||rws[0];const dest=MISSIONS[type]?.destination&&layout[1];
+    destRw=destRw||(dest?runwaysFor(dest)[0]:rws[(homeRw.index+1)%rws.length]);
+    return Navigation.route(api,type,course,layout,homeRw,destRw).gates;
   }
-  // Climb out, cross the water on two waypoints, join the destination's pattern abeam its runway,
-  // then fly the same downwind and final approach every circuit uses.
-  // Climb out north, then follow a low-ground path (a coarse grid search over both islands) to a
-  // point abeam the destination runway, and fly the same downwind and final every circuit uses.
-  function destinationRoute(layout, homeRw, destRw){
-    const home=layout[0],dest=layout[1],dx=dest.x,dz=dest.z;
-    homeRw=homeRw||runwaysFor(home)[0]; destRw=destRw||runwaysFor(dest)[0];
-    // Two ways into the pattern: a dogleg onto final (for flights arriving northbound) or joining the
-    // downwind leg directly (arriving from the north). Both sides of the runway are tried; the option whose
-    // real path arrives closest to the leg's heading, over the lowest ground, wins.
-    const room=(p)=>{let top=0;for(let k=0;k<12;k++){const a=k/12*Math.PI*2;for(const r of [400,800,1100])top=Math.max(top,terrainHeight(layout,p.x+Math.cos(a)*r,p.z+Math.sin(a)*r));}return top;};
-    const evaluate=(from)=>{const options=[];
-      for(const side of [-1,1])for(const dogleg of [true,false]){
-        const goal=dogleg?{x:dx+side*1200,y:250,z:dz+3500}:{x:dx+side*600,y:180,z:dz+1550};
-        const want=dogleg?Math.atan2(-side*1200,-(2250-3500)):Math.PI; // heading of the leg that follows the goal
-        const path=lowGroundPath(layout,from,goal),prev=path[path.length-2]||from;
-        const arrive=Math.atan2(goal.x-prev.x,-(goal.z-prev.z)),off=Math.abs(Math.atan2(Math.sin(arrive-want),Math.cos(arrive-want)));
-        let len=0;for(let i=1;i<path.length;i++)len+=Math.hypot(path[i].x-path[i-1].x,path[i].z-path[i-1].z);
-        options.push({goal,path,want,score:off*3000+room(goal)*25+len*.15+Math.max(0,path.length-3)*900});
-      }
-      return options.sort((a,b)=>a.score-b.score);};
-    const options=evaluate({x:0,z:-1800});
-    const first=options[0];
-    // Climb out on whichever heading off the runway has the most room, leaning towards the first waypoint,
-    // then route from that climb gate for real.
-    const next=first.path[1]||first.goal,want=Math.atan2(next.x,-(next.z+1050));
-    const wide=(p)=>{let top=0;for(const r of [300,600,900,1200,1500])for(let k=0;k<20;k++){const a=k/20*Math.PI*2;top=Math.max(top,terrainHeight(layout,p.x+Math.cos(a)*r,p.z+Math.sin(a)*r));}return top;};
-    const nearHigh=(p,r)=>{for(const rr of [r*.5,r])for(let k=0;k<16;k++){const a=k/16*Math.PI*2;if(terrainHeight(layout,p.x+Math.cos(a)*rr,p.z+Math.sin(a)*rr)>40)return true;}return false;};
-    const candidates=[-60,-40,-20,0,20,40,60].map(deg=>{const a=deg*Math.PI/180,p={x:Math.sin(a)*2200,y:220,z:-1050-Math.cos(a)*2200};const off=Math.abs(Math.atan2(Math.sin(a-want),Math.cos(a-want)));const valid=!nearHigh(p,700)&&clearAbove(layout,{x:0,z:-1050},p)===0;return {p,valid,score:wide(p)*2+Math.abs(deg)*.3+off*45+(valid?0:1e6)};}).sort((a,b)=>a.score-b.score);
-    const climb=candidates[0].p;
-    // The route is computed for straight runways at each end (takeoff at the origin heading north,
-    // landing abeam the destination). Gates are collected in three groups — the departure climb-out,
-    // the water crossing, and the arrival pattern — so the two runway ends can be rotated and shifted
-    // onto the actual angled runways afterwards while the over-water path is left untouched.
-    const homeGates=[{x:0,y:95,z:-1050},climb], midGates=[], destGates=[];
-    // A sharp turn right after the climb-out sweeps a kilometre sideways, so keep climbing straight
-    // ahead until the turn can be made in the clear.
-    // Re-evaluate the pattern options from the real climb gate (and again after any extension), then route.
-    let best=evaluate(climb)[0],from=climb;
-    {const nxt=best.path[1]||best.goal,heading=Math.atan2(climb.x,-(climb.z+1050)),toNext=Math.atan2(nxt.x-from.x,-(nxt.z-from.z)),turn=Math.abs(Math.atan2(Math.sin(toNext-heading),Math.cos(toNext-heading)));
-      if(turn>1.4){for(let d=900;d<=7200;d+=900){const p={x:climb.x+Math.sin(heading)*d,y:300,z:climb.z-Math.cos(heading)*d};if(nearHigh(p,1900)||clearAbove(layout,from,p)>0)continue;homeGates.push(p);from=p;best=evaluate(from)[0];break;}}}
-    const goal=best.goal,path=best.path;
-    const tail=()=>midGates[midGates.length-1]||homeGates[homeGates.length-1];
-    for(const p of path.slice(1,-1)){const last=tail();if(Math.hypot(p.x-last.x,p.z-last.z)<400)continue;midGates.push({x:p.x,y:380,z:p.z});}
-    // Stay at cruise height until 3 km out, so the descent happens over the water near the destination.
-    {const last=tail(),d=Math.hypot(goal.x-last.x,goal.z-last.z);if(d>4500){const t=1-3000/d;midGates.push({x:last.x+(goal.x-last.x)*t,y:380,z:last.z+(goal.z-last.z)*t});}}
-    // If the real path still arrives well off the leg's heading, add an alignment gate 1500 m before the goal.
-    {const prev=tail(),arrive=Math.atan2(goal.x-prev.x,-(goal.z-prev.z)),want=best.want,off=Math.abs(Math.atan2(Math.sin(arrive-want),Math.cos(arrive-want)));
-      const align={x:goal.x-Math.sin(want)*1500,y:goal.y+90,z:goal.z+Math.cos(want)*1500};
-      if(off>.8&&Math.hypot(align.x-prev.x,align.z-prev.z)>600&&clearAbove(layout,prev,align)===0&&clearAbove(layout,align,goal)===0)destGates.push(align);}
-    destGates.push(goal,{x:dx,y:150,z:dz+2250},{x:dx,y:65,z:dz+1250});
-    // Rotate/shift each end onto its runway; runway 36 at both ends leaves the route unchanged.
-    const hx=g=>{const w=runwayToWorld(home,homeRw,g.x,g.z);return {x:w.x,y:g.y,z:w.z};};
-    const dxf=g=>{const w=runwayToWorld(dest,destRw,g.x-dx,g.z-dz);return {x:w.x,y:g.y,z:w.z};};
-    return [...homeGates.map(hx), ...midGates, ...destGates.map(dxf)];
-  }
-  // A* over a 400 m grid; cells over high ground are impassable. The path is then straightened with
-  // line-of-sight checks so a flight has only a handful of waypoints.
-  function lowGroundPath(layout,start,goal){
-    const cell=400,pad=7000,minX=Math.min(start.x,goal.x)-pad,minZ=Math.min(start.z,goal.z)-pad,maxX=Math.max(start.x,goal.x)+pad,maxZ=Math.max(start.z,goal.z)+pad;
-    const w=Math.ceil((maxX-minX)/cell)+1,h=Math.ceil((maxZ-minZ)/cell)+1,blocked=new Uint8Array(w*h);
-    const high=(x,z)=>terrainHeight(layout,x,z)>40;
-    // Cells are blocked when high ground lies within 600 m, leaving room for the turn radius.
-    const near=(x,z)=>{if(high(x,z))return true;for(let r of [300,600])for(let k=0;k<8;k++){const a=k/8*Math.PI*2;if(high(x+Math.cos(a)*r,z+Math.sin(a)*r))return true;}return false;};
-    for(let j=0;j<h;j++)for(let i=0;i<w;i++)blocked[j*w+i]=near(minX+i*cell,minZ+j*cell)?1:0;
-    const idx=(p)=>[Math.round((p.x-minX)/cell),Math.round((p.z-minZ)/cell)];
-    const [sx,sz]=idx(start),[gx,gz]=idx(goal);blocked[sz*w+sx]=0;blocked[gz*w+gx]=0;
-    const g=new Float64Array(w*h).fill(Infinity),from=new Int32Array(w*h).fill(-1),open=[sz*w+sx];g[sz*w+sx]=0;
-    const hcost=(i,j)=>Math.hypot(i-gx,j-gz);const done=new Uint8Array(w*h);
-    while(open.length){
-      let best=0;for(let k=1;k<open.length;k++){const a=open[k],b=open[best];if(g[a]+hcost(a%w,Math.floor(a/w))<g[b]+hcost(b%w,Math.floor(b/w)))best=k;}
-      const cur=open.splice(best,1)[0];if(done[cur])continue;done[cur]=1;const ci=cur%w,cj=Math.floor(cur/w);
-      if(ci===gx&&cj===gz)break;
-      for(let dj=-1;dj<=1;dj++)for(let di=-1;di<=1;di++){if(!di&&!dj)continue;const ni=ci+di,nj=cj+dj;if(ni<0||nj<0||ni>=w||nj>=h)continue;const n=nj*w+ni;if(blocked[n]||done[n])continue;const cost=g[cur]+Math.hypot(di,dj);if(cost<g[n]){g[n]=cost;from[n]=cur;open.push(n);}}
-    }
-    let node=gz*w+gx;if(from[node]<0&&node!==sz*w+sx)return [start,goal];
-    const cells=[];while(node>=0){cells.push({x:minX+(node%w)*cell,z:minZ+Math.floor(node/w)*cell});node=from[node];}
-    cells.reverse();cells[0]=start;cells[cells.length-1]=goal;
-    const clear=(a,b)=>{const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1,nx=-dz/len*150,nz=dx/len*150,n=Math.ceil(len/100);for(let k=0;k<=n;k++){const t=k/n,x=a.x+dx*t,z=a.z+dz*t;for(let m=-3;m<=3;m++)if(high(x+nx*m,z+nz*m))return false;}return true;};
-    const out=[cells[0]];let i=0;
-    while(i<cells.length-1){let j=cells.length-1;while(j>i+1&&!clear(cells[i],cells[j]))j--;out.push(cells[j]);i=j;}
-    return out;
-  }
-  function liftRoute(layout, gates){
-    // Lift gates clear of the scenery, then keep climbs within a gradient the trainer can fly:
-    // earlier gates are raised to meet a high gate, never lowered into terrain.
-    const need = gates.map(()=>0);
-    for (let i=1;i<gates.length;i++) { const c = clearAbove(layout, gates[i-1], gates[i]); need[i] = Math.max(need[i], c); if (i > 1) need[i-1] = Math.max(need[i-1], c); }
-    for (let i=1;i<gates.length;i++) gates[i].y = Math.max(gates[i].y, need[i]);
-    for (let i=gates.length-2;i>=1;i--) { const g=gates[i], n=gates[i+1]; g.y = Math.max(g.y, n.y - Math.hypot(n.x-g.x, n.z-g.z) * .085); }
-    for (let i=1;i<gates.length;i++) { const p=gates[i-1], g=gates[i]; g.y = Math.max(need[i], Math.min(g.y, p.y + Math.hypot(g.x-p.x, g.z-p.z) * .085)); }
-    // Descents are limited too (7%), by lowering the earlier gate where the scenery allows it.
-    for (let i=gates.length-3;i>=2;i--) { const p=gates[i-1], g=gates[i]; p.y = Math.max(need[i-1], Math.min(p.y, g.y + Math.hypot(g.x-p.x, g.z-p.z) * .07)); }
-    return gates;
+  function startTaxi(f){
+    if(!f.onGround||f.speed>10||f.crashed||f.completed)return false;
+    if(!f.airborne){f.taxiPath=Navigation.taxi(api,f.islands[f.departureIsland||0],runwaysFor(f.islands[f.departureIsland||0])[f.homeRunway]);f.phase='taxi-out';}
+    else if(f.landed&&f.gate>=f.gates.length){const isle=f.islands[f.finish],rw=runwaysFor(isle)[f.finishRunway];f.taxiPath=Navigation.taxi(api,isle,rw).slice().reverse();f.phase='taxi-in';}
+    else return false;
+    f.taxiIndex=0;f.taxiAssist=true;f.throttle=0;return true;
   }
   function newFlight(type, s, destination=null) {
     const islands=flightLayout(s,type,destination),free=type==='free';
     const home=islands[0], homeRws=runwaysFor(home);
-    const homeIdx=runwayFor(s.world.mode,type,homeRws.length), homeRw=homeRws[homeIdx];
-    const dest=islands[1];
-    const destRw=dest ? runwaysFor(dest)[Math.min(homeIdx,runwaysFor(dest).length-1)] : null;
-    const finishIdx = destination ? (destRw?destRw.index:homeIdx) : homeIdx;
-    const spawn=runwayToWorld(home,homeRw,0,homeRw.half-250);
-    return { type,map:home.map.id,islands,destination:free?null:destination,finish:destination?1:0,x:spawn.x,y:2,z:spawn.z, vx:0,vy:0,vz:0, yaw:homeRw.rad,pitch:0,roll:0,
+    let homeIdx=runwayFor(s.world.mode,type,homeRws.length), homeRw=homeRws[homeIdx];
+    const dest=destination?islands[1]:null;
+    let destRw=dest ? runwaysFor(dest)[Math.min(homeIdx,runwaysFor(dest).length-1)] : homeRws[(homeIdx+1)%homeRws.length];
+    let route=free?{gates:[],path:[],feasible:true}:Navigation.route(api,type,s.course,islands,homeRw,destRw);
+    if(!route.feasible){
+      const arrivals=dest?runwaysFor(dest):homeRws;
+      const departures=[homeRw,...homeRws.filter(r=>r!==homeRw)];
+      search:for(const departure of departures)for(const arrival of arrivals){
+        if(!dest&&departure.index===arrival.index)continue;
+        const candidate=Navigation.route(api,type,s.course,islands,departure,arrival);
+        if(candidate.feasible||candidate.score<route.score){route=candidate;homeRw=departure;homeIdx=departure.index;destRw=arrival;}
+        if(candidate.feasible)break search;
+      }
+    }
+    const finishIdx=destRw.index;
+    const spawn=Navigation.stand(home),arrivalStand=Navigation.stand(dest||home);
+
+    return { type,map:home.map.id,islands,destination:free?null:destination,finish:destination?1:0,x:spawn.x,y:2,z:spawn.z, vx:0,vy:0,vz:0, yaw:spawn.yaw,pitch:0,roll:0,phase:'parked',arrivalStand,taxiAssist:false,navPath:route.path,navIndex:0,
       throttle:0,flaps:0,gear:true,fuel:100,health:100,cargo:100,speed:0,airSpeed:0,verticalSpeed:0,
-      gates:free?[]:makeRoute(type,s.course,islands,homeRw,destRw),gate:0,gateTimes:[],time:0,airborne:false,onGround:true,stall:false,
+      gates:route.gates,gate:0,gateTimes:[],time:0,airborne:false,onGround:true,stall:false,
       engineFailure:false,landed:false,crashed:false,completed:false,gateRadius:difficulty(s).gate,
       maxAltitude:0, hardLanding:0, runwayHalf:homeRw.half, homeRunway:homeIdx, finishRunway:finishIdx,
       runwayName:homeRw.name, finishRunwayName:(destRw||homeRw).name, lastGateDistance:Infinity, refuelled:false };
@@ -533,23 +440,33 @@
   // Which runway is under the aircraft: { island, runway } indices, or { island:-1, runway:-1 }.
   // Where runways cross, the strip whose centreline the aircraft is closest to wins, so a mission is
   // judged against the runway it is actually tracking rather than whichever one is listed first.
-  function runwayAt(f){
+  function runwayAt(f,margin=0){
     let bestIsle=-1,bestRw=-1,bestLat=Infinity;
     for(let i=0;i<f.islands.length;i++){
       const isle=f.islands[i];
       for(const rw of runwaysFor(isle)){
         const dx=f.x-(isle.x+rw.cx),dz=f.z-(isle.z+rw.cz);
         const lx=rw.cos*dx+rw.sin*dz, lz=-rw.sin*dx+rw.cos*dz;
-        if(Math.abs(lx)<rw.width/2 && Math.abs(lz)<rw.half && Math.abs(lx)<bestLat){ bestLat=Math.abs(lx); bestIsle=i; bestRw=rw.index; }
+        if(Math.abs(lx)<rw.width/2+margin && Math.abs(lz)<rw.half+margin && Math.abs(lx)<bestLat){ bestLat=Math.abs(lx); bestIsle=i; bestRw=rw.index; }
       }
     }
     return { island:bestIsle, runway:bestRw };
   }
   function stepFlight(f, controls, dt, settings) {
     if (f.crashed || f.completed) return [];
-    const events=[]; f.time+=dt;
+    const events=[]; f.time+=dt;const tuning=flightDifficulty(settings);
     const p0={x:f.x,y:f.y,z:f.z,yaw:f.yaw,pitch:f.pitch,roll:f.roll};
-    const windStrength=settings.weather==='storm'?12:settings.weather==='overcast'?4:0;
+    if(f.taxiAssist){
+      if(controls.brake||controls.throttle||controls.rudder||controls.roll){f.taxiAssist=false;f.vx=f.vz=f.speed=f.airSpeed=0;return events;}
+      const target=f.taxiPath[f.taxiIndex],dx=target.x-f.x,dz=target.z-f.z,d=Math.hypot(dx,dz),step=Math.min(d,10*dt);
+      let moved=false;
+      if(d>.01){const desired=Math.atan2(dx,-dz),delta=Math.atan2(Math.sin(desired-f.yaw),Math.cos(desired-f.yaw));f.yaw+=clamp(delta,-.65*dt,.65*dt);if(Math.abs(delta)<.15){f.x+=dx/d*step;f.z+=dz/d*step;moved=true;}}
+      f.speed=f.airSpeed=moved?10:0;f.vx=f.vz=f.vy=f.verticalSpeed=0;f.y=2;f.pitch=f.roll=0;
+      if(root.SkyWorld?.sceneryCollision(f,p0)){f.taxiAssist=false;f.crashed=true;events.push({type:'crash',reason:'Taxi path obstructed. Keep clear of scenery.'});return events;}
+      if(d<.5){f.taxiIndex++;if(f.taxiIndex>=f.taxiPath.length){f.taxiAssist=false;f.speed=f.airSpeed=0;if(f.phase==='taxi-out'){f.phase='takeoff';f.yaw=runwaysFor(f.islands[f.departureIsland||0])[f.homeRunway].rad;}else if(f.type==='free'){f.phase='parked';f.airborne=f.landed=false;f.departureIsland=f.finish;f.homeRunway=f.finishRunway;f.runwayName=f.finishRunwayName;}else{f.phase='arrived';f.completed=true;events.push({type:'complete'});}}}
+      return events;
+    }
+    const windStrength=(settings.weather==='storm'?12:settings.weather==='overcast'?4:0)*tuning.wind;
     const windX=windStrength*(.6+Math.sin(f.time*.17)*.4);
     const windZ=windStrength*Math.cos(f.time*.13)*.3;
     const relX=f.vx-windX,relZ=f.vz-windZ;
@@ -559,20 +476,25 @@
     const pitchInput=(controls.pitch||0)*(settings.invert?-1:1);
     const pitchRate = pitchInput*.29*authority - f.pitch*.12 - (f.stall?.13:0);
     f.pitch=clamp(f.pitch+pitchRate*dt,-.5,.48);
-    f.roll=clamp(f.roll+((controls.roll||0)*.65*authority-f.roll*.32)*dt,-1.05,1.05);
+    f.roll=clamp(f.roll+((controls.roll||0)*.65*authority-f.roll*tuning.stability)*dt,-1.05,1.05);
     if (f.onGround) f.roll*=Math.exp(-5*dt);
-    const turn=f.onGround?(controls.rudder||controls.roll||0)*clamp(speed/40,0,.7):Math.tan(f.roll)*9.81/Math.max(speed,22)+(controls.rudder||0)*.13;
+    const turn=f.onGround?(controls.rudder||controls.roll||0)*clamp(speed/40,0,.7)*tuning.steering:Math.tan(f.roll)*9.81/Math.max(speed,22)+(controls.rudder||0)*.13;
     f.yaw+=turn*dt;
+    if(tuning.autoRotate&&f.onGround&&runwayAt(f).island>=0&&speed>32&&!pitchInput)f.pitch+=clamp(.14-f.pitch,-.15*dt,.15*dt);
     const pathAngle=Math.atan2(f.vy,Math.max(speed,8));
     const aoa=f.pitch-pathAngle;
-    f.stall=!f.onGround&&(aoa>.3||speed<23);
-    const cl=clamp(.35+4.1*aoa+f.flaps*.24,-.8,1.7)*(f.stall?.38:1);
+    f.stall=!f.onGround&&(aoa>tuning.stallAngle||speed<tuning.stallSpeed);
+    const cl=clamp(.35+4.1*aoa+f.flaps*.24,-.8,1.7)*(f.stall?tuning.stallLift:1);
     const density=1.225*Math.exp(-f.y/9000),mass=1250,area=16.2;
     const lift=.5*density*speed*speed*area*cl;
     const drag=.5*density*speed*speed*area*(.033+.049*cl*cl+(f.gear?.016:0)+f.flaps*.018);
     const thrust=f.fuel>0?f.throttle*(f.engineFailure?2450:4200)*Math.max(.45,1-speed/150):0;
     const accel=(thrust*Math.cos(f.pitch)-drag)/mass-(f.onGround?.6:0);
     let groundSpeed=Math.max(0,Math.hypot(f.vx,f.vz)+accel*dt-(controls.brake&&f.onGround?7*dt:0));
+    // Gate and taxiway acceleration is a taxi operation, not a runway excursion.
+    const groundRunway=runwayAt(f,tuning.runwayMargin);
+    if(f.onGround&&!f.airborne&&groundRunway.island>=0&&groundSpeed>18)f.takeoffRoll=true;
+    if(f.onGround&&!f.airborne&&!f.takeoffRoll&&groundRunway.island<0){groundSpeed=Math.min(groundSpeed,10);if(groundSpeed>.1)f.phase='taxi-out';}
     const forwardX=Math.sin(f.yaw),forwardZ=-Math.cos(f.yaw);
     // Sideslip decays gradually in the air; the wheels track the runway on the ground.
     const desiredX=forwardX*groundSpeed+(f.onGround?0:windX*.16),desiredZ=forwardZ*groundSpeed+(f.onGround?0:windZ*.16);
@@ -583,23 +505,27 @@
     if(alignedSpeed>0){f.vx=f.vx/alignedSpeed*groundSpeed;f.vz=f.vz/alignedSpeed*groundSpeed;}
     const ay=lift*Math.cos(f.roll)/mass+thrust*Math.sin(f.pitch)/mass-9.81;
     f.vy+=ay*dt;
-    if (settings.weather==='storm'&&!f.onGround) { f.vy+=Math.sin(f.time*3.7)*dt*1.8;f.roll+=Math.sin(f.time*2.2)*dt*.04; }
+    if (settings.weather==='storm'&&!f.onGround) { f.vy+=Math.sin(f.time*3.7)*dt*1.8*tuning.wind;f.roll+=Math.sin(f.time*2.2)*dt*.04*tuning.wind; }
     f.x+=f.vx*dt;f.z+=f.vz*dt;f.y+=f.vy*dt;
     f.speed=Math.hypot(f.vx,f.vz);f.verticalSpeed=f.vy;f.maxAltitude=Math.max(f.maxAltitude,f.y);
     f.fuel=Math.max(0,f.fuel-dt*(.007+f.throttle*.031));
-    if(f.y>4){f.airborne=true;f.onGround=false;}
+    if(f.y>4||f.y>2.25&&f.vy>.1){f.airborne=true;f.onGround=false;f.phase='airborne';}
+    if(f.navPath?.length){while(f.navIndex<Math.min(f.gates[f.gate]?.pathIndex||f.navPath.length-1,f.navPath.length-1)&&Math.hypot(f.x-f.navPath[f.navIndex].x,f.z-f.navPath[f.navIndex].z)<220)f.navIndex++;}
     if(f.y<=2){
-      const at=runwayAt(f),runway=at.island>=0;
+      const at=runwayAt(f,tuning.runwayMargin),runway=at.island>=0;
       const hard=Math.abs(f.vy);
       if(f.airborne&&!f.onGround){
         f.hardLanding=hard;
-        if(!runway||!f.gear||hard>5||Math.abs(f.roll)>.3||f.speed>65){f.crashed=true;events.push({type:'crash',reason:!runway?'You touched down away from the runway.':!f.gear?'The landing gear was still retracted.':hard>5?'The descent was too fast at touchdown.':Math.abs(f.roll)>.3?'The wings were not level at touchdown.':'The approach speed was too high.'});}
-        else {f.health-=Math.max(0,hard-2)*12;f.cargo-=Math.max(0,hard-1.5)*10;events.push({type:'touchdown',island:at.island,runway:at.runway});}
+        if(!runway||!f.gear||hard>tuning.sink||Math.abs(f.roll)>tuning.landingRoll||f.speed>tuning.landingSpeed){f.crashed=true;events.push({type:'crash',phase:'landing',reason:!runway?'You touched down away from the runway.':!f.gear?'The landing gear was still retracted.':hard>tuning.sink?'The descent was too fast at touchdown.':Math.abs(f.roll)>tuning.landingRoll?'The wings were not level at touchdown.':'The approach speed was too high.'});}
+        else {if(f.type==='free'){f.finish=at.island;f.finishRunway=at.runway;f.finishRunwayName=runwaysFor(f.islands[at.island])[at.runway].name;f.arrivalStand=Navigation.stand(f.islands[at.island]);}f.landed=at.island===f.finish&&at.runway===f.finishRunway;f.phase='landing';f.health-=Math.max(0,hard-2)*12;f.cargo-=Math.max(0,hard-1.5)*10;events.push({type:'touchdown',island:at.island,runway:at.runway});}
       }
       // Free flight: any runway is a fuel stop — touch down, roll, and take off again.
       if(f.type==='free'&&runway&&f.fuel<99.5){f.fuel=100;f.refuelled=true;events.push({type:'refuel',island:at.island,runway:at.runway});}
       f.y=2;f.vy=Math.max(0,f.vy);f.onGround=true;f.pitch=Math.max(0,f.pitch);
-      if(f.onGround&&!f.airborne&&(!runway&&f.speed>15)){f.crashed=true;events.push({type:'crash',reason:'The aircraft left the runway during takeoff. Use gentle steering.'});}
+      if(!f.airborne&&at.island===(f.departureIsland||0)&&at.runway===f.homeRunway)f.phase='takeoff';
+      f.offRunwayTime=f.takeoffRoll&&!runway&&f.speed>20?(f.offRunwayTime||0)+dt:0;
+      if(f.offRunwayTime>tuning.excursionGrace){f.crashed=true;events.push({type:'crash',phase:'takeoff',reason:'The takeoff roll continued outside the runway.'});}
+      if(!runway&&f.speed<12)f.takeoffRoll=false;
     }
     // Sweep against the same static meshes used to draw every island, before rewards/gates.
     if(!f.crashed&&root.SkyWorld?.sceneryCollision(f,p0)){
@@ -614,9 +540,9 @@
       const t=clamp(((gate.x-p0.x)*dx+(gate.y-p0.y)*dy+(gate.z-p0.z)*dz)/(dx*dx+dy*dy+dz*dz||1),0,1);
       const distance=Math.hypot(p0.x+dx*t-gate.x,p0.y+dy*t-gate.y,p0.z+dz*t-gate.z);
       f.lastGateDistance=Math.hypot(f.x-gate.x,f.y-gate.y,f.z-gate.z);
-      if(distance<f.gateRadius){f.gate++;f.gateTimes.push(f.time);events.push({type:'gate'});if(f.type==='emergency'&&f.gate===(f.destination?2:Math.floor(f.gates.length/2))){f.engineFailure=true;events.push({type:'engine'});}}
+      if(distance<f.gateRadius){f.navIndex=Math.max(f.navIndex||0,gate.pathIndex||0);f.gate++;f.gateTimes.push(f.time);events.push({type:'gate'});if(f.type==='emergency'&&f.gate===(f.destination?2:Math.floor(f.gates.length/2))){f.engineFailure=true;events.push({type:'engine'});}}
     }
-    if(f.type!=='free'&&f.gate>=f.gates.length&&f.onGround&&f.airborne&&f.speed<5&&!f.crashed){const fin=runwayAt(f);if(fin.island===f.finish&&fin.runway===f.finishRunway){f.completed=true;events.push({type:'complete'});}}
+    if(f.type!=='free'&&f.gate>=f.gates.length&&f.onGround&&f.airborne&&f.speed<5&&!f.crashed){if(f.landed&&Math.hypot(f.x-f.arrivalStand.x,f.z-f.arrivalStand.z)<9&&f.throttle<.05&&controls.brake){f.phase='arrived';f.completed=true;events.push({type:'complete'});}}
     if(f.y>2000) {f.pitch=Math.min(f.pitch,-.05);events.push({type:'ceiling'});}
     // Scenery is solid: mountains, hills, and mesas end the flight on contact.
     const ground=terrainHeight(f.islands||MAP_BY_ID[f.map]||MAPS[0],f.x,f.z);if(!f.onGround&&!f.crashed&&ground>3&&f.y<ground+2.5){f.crashed=true;events.push({type:'crash',reason:'You flew into the terrain. Watch the scenery and keep clear of the high ground.'});}
@@ -635,6 +561,6 @@
     if(f.type==='race'&&(!s.bestRace||f.time<s.bestRace)){s.bestRace=f.time;f.newRecord=true;if(Array.isArray(trace))s.raceRecord=sanitizeRecord({time:f.time,trace,gateTimes:f.gateTimes})||s.raceRecord;}
     return s.world?.business===false?0:amount;
   }
-  const api={STAFF,BUILDINGS,MISSIONS,ROLES,DESTINATIONS,MODES,SOLO_MODES,TERRAINS,MAPS,EQUIPPED,GHOST_RATE,clamp,worldName,worldMode,worldTerrain,worldMap,currentMap,mapsFor,mountainsFor,terrainHeight,lowGroundPath,homeLayout,freeLayout,flightLayout,pickDestination,runwayAt,runwaysFor,runwayToWorld,runwayFor,freshState,sanitize,sanitizeRecord,sampleGhost,ghostAt,entry,spend,price,build,hire,wageRate,difficulty,tickEconomy,completeTask,makeRoute,newFlight,stepFlight,rewardFlight};
+  const api={STAFF,BUILDINGS,MISSIONS,ROLES,DESTINATIONS,MODES,SOLO_MODES,TERRAINS,MAPS,EQUIPPED,GHOST_RATE,clamp,worldName,worldMode,worldTerrain,worldMap,currentMap,mapsFor,mountainsFor,terrainHeight,homeLayout,freeLayout,flightLayout,pickDestination,runwayAt,runwaysFor,runwayToWorld,runwayFor,startTaxi,freshState,sanitize,sanitizeRecord,sampleGhost,ghostAt,entry,spend,price,build,hire,wageRate,FLIGHT_DIFFICULTY,flightDifficulty,difficulty,tickEconomy,completeTask,makeRoute,newFlight,stepFlight,rewardFlight};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.SkyCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

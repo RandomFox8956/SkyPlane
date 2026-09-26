@@ -13,7 +13,7 @@ const { spawn, spawnSync } = require('node:child_process');
 
 const ROOT = __dirname;
 // The game files that get bundled into the app (must match package.json "build.files").
-const FILES = ['index.html', 'style.css', 'core.js', 'worlds.js', 'cockpit.js', 'world.js', 'app.js', 'main.js'];
+const FILES = ['index.html', 'style.css', 'core.js', 'navigation.js', 'airport.js','airport-assets.js','render3d.js','jobs.js','workplace.js', 'worlds.js', 'cockpit.js', 'world.js', 'app.js', 'main.js'];
 const UNPACKED = path.join(ROOT, 'dist', 'win-unpacked');
 const APP_DIR = path.join(UNPACKED, 'resources', 'app');
 const syncOnce = process.argv.includes('--sync-once');

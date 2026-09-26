@@ -56,7 +56,7 @@
     <div class="flight-top"><button id="flight-exit" class="glass-button">← Airport</button><div class="flight-mission"><small id="flight-type">FLIGHT SCHOOL</small><strong id="flight-objective">Ready for takeoff</strong><span id="flight-progress"></span></div><button id="flight-pause" class="glass-button" aria-label="Pause flight">Ⅱ Pause</button></div>
     <div id="flight-hint" class="flight-hint"></div>
     <div id="flight-warning" class="flight-warning hidden" role="status"></div>
-    <div class="flight-bottom"><div class="flight-instruments"><div><small>AIRSPEED</small><strong id="hud-speed">0</strong><span>KNOTS</span></div><div><small>ALTITUDE</small><strong id="hud-altitude">0</strong><span>FEET AGL</span></div><div class="attitude" id="attitude"><div id="attitude-horizon"></div><span>— ┼ —</span></div><div><small>THROTTLE</small><strong id="hud-throttle">0</strong><span>PERCENT</span></div><div><small>FUEL</small><strong id="hud-fuel">100</strong><span>PERCENT</span></div></div><div class="flight-config"><span id="hud-gear">GEAR DOWN</span><span id="hud-flaps">FLAPS 0°</span><span id="hud-heading">HDG 000</span><button id="camera-button">C · Camera</button><button id="replay-button">Replay</button></div></div>
+    <div class="flight-bottom"><div class="flight-instruments"><div><small>AIRSPEED</small><strong id="hud-speed">0</strong><span>KNOTS</span></div><div><small>ALTITUDE</small><strong id="hud-altitude">0</strong><span>FEET AGL</span></div><div class="attitude" id="attitude"><div id="attitude-horizon"></div><span>— ┼ —</span></div><div><small>THROTTLE</small><strong id="hud-throttle">0</strong><span>PERCENT</span></div><div><small>FUEL</small><strong id="hud-fuel">100</strong><span>PERCENT</span></div></div><div class="flight-config"><span id="hud-gear">GEAR DOWN</span><span id="hud-flaps">FLAPS 0°</span><span id="hud-heading">HDG 000</span><button data-action="taxi" id="taxi-button">T · Taxi assist</button><button id="camera-button">C · Camera</button><button id="replay-button">Replay</button></div></div>
     <canvas id="minimap" width="180" height="180" aria-label="Flight navigation map" title="Drag to move · scroll to zoom · double-click to enlarge"></canvas>
     <div id="map-zoom" class="map-zoom"><button id="map-zoom-out" aria-label="Zoom map out" title="Zoom out ( [ )">−</button><span id="map-zoom-level">1×</span><button id="map-zoom-in" aria-label="Zoom map in" title="Zoom in ( ] )">+</button><button id="map-zoom-centre" aria-label="Centre map on aircraft" title="Back to the aircraft">⌖</button><button id="map-zoom-size" aria-label="Enlarge map" title="Enlarge map (M)">⤢</button></div>
     <div id="touch-controls" class="touch-controls"><div><button data-control="a" aria-label="Bank left">◁</button><button data-control="s" aria-label="Pitch up">↑</button><button data-control="w" aria-label="Pitch down">↓</button><button data-control="d" aria-label="Bank right">▷</button></div><div><button data-control="-" aria-label="Reduce throttle">−</button><button data-control="=" aria-label="Increase throttle">+</button><button id="touch-flaps">Flaps</button><button id="touch-gear">Gear</button><button data-control="b">Brake</button></div></div>
@@ -64,10 +64,16 @@
   </section>
   <div id="modal-root"></div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <script src="navigation.js"></script>
+  <script src="airport-assets.js"></script>
+  <script src="airport.js"></script>
   <script src="core.js"></script>
   <script src="worlds.js"></script>
   <script src="cockpit.js"></script>
+  <script src="render3d.js"></script>
+  <script src="jobs.js"></script>
   <script src="world.js"></script>
+  <script src="workplace.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
