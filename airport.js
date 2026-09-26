@@ -8,7 +8,8 @@
     {role:'pilot',name:'Flight operations',x:409,z:-88},
     {role:'manager',name:'Airport management',x:409,z:-130},
     {role:'engineer',name:'Maintenance workshop',x:376,z:162},
-    {role:'ground',name:'Gate A1 · Ground services',x:319,z:218}
+    {role:'ground',name:'Gate A1 · Ground services',x:319,z:218},
+    {role:'atc',name:'Air traffic control',x:352,z:-150}
   ];
   function plan(){
     const boxes=[],signs=[];
@@ -61,7 +62,7 @@
     sign(384,9,94,63,'SEABREEZE / DEPARTURES');sign(384,8,20,62,'CHECK-IN   |   SECURITY / GATES');
     sign(384,8,-23,60,'A2  A3  /  DEPARTURE LOUNGE');sign(414,6,-69,27,'FLIGHT OPERATIONS');
     sign(414,6,-115,27,'AIRPORT MANAGER');sign(349,6,-78,19,'GATE A2');sign(352,6,9,21,'COAST CAFE');
-    sign(415,5,12,23,'WASHROOMS');sign(368,8,119,46,'MAINTENANCE / STAFF');sign(319,6,232,28,'A1 / GROUND SERVICES');
+    sign(415,5,12,23,'WASHROOMS');sign(368,8,119,46,'MAINTENANCE / STAFF');sign(319,6,232,28,'A1 / GROUND SERVICES');sign(352,6,-142,26,'AIR TRAFFIC CONTROL');
     for(const s of stations)sign(s.x,4.7,s.z+3,Math.min(18,s.name.length*.8),s.role.toUpperCase());
     // Bollards, planting and an exterior roofline give the terminal a distinct silhouette.
     for(const z of [-130,-65,10,92]){box(435,2,z,5,1.2,5,'#8b967d');box(435,3.2,z,4,3,4,'#73965f');}

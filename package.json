@@ -47,7 +47,7 @@
           ]
         }
       ],
-      "signAndEditExecutable": false
+      "icon": "icon.ico"
     },
     "portable": {
       "artifactName": "SkyPlane-windows v2.exe"

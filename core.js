@@ -8,7 +8,8 @@
     security: { name: 'Security officers', initial: 'S', role: 'Security guard', description: 'Screen baggage and keep the terminal moving.', wage: 75, hire: 700, stage: 1 },
     ground: { name: 'Ground crew', initial: 'G', role: 'Ground crew', description: 'Load baggage, refuel aircraft, and prepare departures.', wage: 70, hire: 650, stage: 2 },
     cabin: { name: 'Cabin crew', initial: 'F', role: 'Cabin crew', description: 'Improve passenger satisfaction and ticket revenue by 6% each (up to 30%).', wage: 55, hire: 500 },
-    engineer: { name: 'Aircraft engineers', initial: 'E', role: 'Aircraft engineer', description: 'Cut aircraft operating costs by 8% each (up to 40%).', wage: 80, hire: 800 }
+    engineer: { name: 'Aircraft engineers', initial: 'E', role: 'Aircraft engineer', description: 'Cut aircraft operating costs by 8% each (up to 40%).', wage: 80, hire: 800 },
+    atc: { name: 'Air traffic controllers', initial: 'A', role: 'Air traffic controller', description: 'Clear departures for takeoff sooner: each controller speeds up the departing stage by 20% (up to 100%).', wage: 85, hire: 900, stage: 3 }
   };
   const BUILDINGS = {
     terminal: { name: 'Passenger terminal', icon: 'build', price: 5000, description: 'More seats, more smiles. Each expansion adds 12 passengers to every scheduled flight.', benefit: '+12 passengers / flight', max: 4 },
@@ -34,7 +35,8 @@
     security: { name: 'Security guard', short: 'Security', initial: 'S', description: 'Inspect bags and identify restricted items.', icon: 'shield' },
     cabin: { name: 'Cabin crew', short: 'Cabin crew', initial: 'F', description: 'Prepare the cabin and look after your passengers.', icon: 'users' },
     ground: { name: 'Ground crew', short: 'Ground crew', initial: 'G', description: 'Load the right cargo and prepare aircraft safely.', icon: 'box' },
-    engineer: { name: 'Aircraft engineer', short: 'Engineer', initial: 'E', description: 'Inspect aircraft and choose the right repair.', icon: 'gear' }
+    engineer: { name: 'Aircraft engineer', short: 'Engineer', initial: 'E', description: 'Inspect aircraft and choose the right repair.', icon: 'gear' },
+    atc: { name: 'Air traffic controller', short: 'ATC', initial: 'A', description: 'Clear aircraft to take off and land, and keep the runways safe.', icon: 'chart' }
   };
   const DESTINATIONS = ['Pinecrest', 'Coral Bay', 'Northhaven', 'Maple Coast', 'Cloudbridge', 'Port Willow'];
   function newDeparture(id, index = 0) {
@@ -254,7 +256,7 @@
     const state={ version: 1, routeVersion:2, visualVersion:2, world:{name:worldName(options.name),tutorial:!solo&&options.tutorial!==false,business,mode,terrain:map.terrain,map:map.id}, trip:null, cash: 24000, seconds: 0, reputation: 82, passengers: 0, completed: 0, missions: 0, tasks: 0,
       revenue: 0, expenses: 0, wages: 0, capital: 0, debt: 0, role: 'manager', skin: '#f0b85a',
       buildings: { terminal: 0, hangar: 0, runway: 0, radar: 0, fuel: 0, rescue: 0 },
-      staff: { checkin: 1, security: 1, ground: 1, cabin: 0, engineer: 0 },
+      staff: { checkin: 1, security: 1, ground: 1, cabin: 0, engineer: 0, atc: 0 },
       departures: [newDeparture(1), newDeparture(2, 1)], nextFlight: 3,
       ledger: [{ label: 'Founder’s starting investment', amount: 24000, time: 0 }], history: [],
       settings: { difficulty: 'easy', graphics: 'high', weather: 'clear', sound: false, touch: false, invert: false },
@@ -367,7 +369,7 @@
         d.progress += dt / 26 * Math.min(2,capacity) * (1 + s.buildings.radar*.15);
         if (d.progress >= 1) { d.stage++; d.progress=0; }
       } else {
-        d.progress += dt/12;
+        d.progress += dt/12 * (1 + Math.min(s.staff.atc||0,5)*.2);
         if (d.progress >= 1) {
           const pax = d.passengers + s.buildings.terminal*12;
           const revenue = Math.round(pax * 32 * ( .75 + s.reputation/400) * (1 + Math.min(s.staff.cabin,5)*.06));
@@ -393,7 +395,8 @@
     s.tasks++;s.cash+=pay;s.revenue+=pay;s.reputation=clamp(s.reputation+(.15+grade*.5),0,100);entry(s,ROLES[role].name+' · shift bonus ('+(grade>=.93?'S':grade>=.82?'A':grade>=.66?'B':grade>=.48?'C':'D')+' grade)',pay);
     const stage = STAFF[role].stage;
     const flight = s.departures.find(x=>x.stage===stage);
-    if (flight) { flight.wait=0;flight.progress+=.6;if(flight.progress>=1){flight.stage++;flight.progress=0;} }
+    // The departing stage (ATC) finishes in tickEconomy, which pays out the flight.
+    if (flight) { flight.wait=0;flight.progress+=.6;if(flight.progress>=1){if(stage<3){flight.stage++;flight.progress=0;}else flight.progress=.99;} }
     return true;
   }
   const Navigation=typeof module!=='undefined'?require('./navigation.js'):root.SkyNavigation;

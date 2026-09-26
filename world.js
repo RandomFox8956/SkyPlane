@@ -282,9 +282,7 @@
     // Cabins and windsock.
     if(map.cabins){const [hx,hz]=map.cabins;for(let i=0;i<6;i++){const x=hx-i*46,z=hz+(i%2)*65;if(!onLand(map,x,z)||inCorridor(x,z)||onTaxi(x,z))continue;box(m,x,2,z,32,22,34,'#e3d5af',1);pyramid(m,x,24,z,28,15,'#9c8570',4,1);}}
     box(m,-92,2,560,2,37,2,'#d2d6b9');face(m,[[-92,37,560],[-68,33,562],[-68,36,565],[-92,42,564]],'#e7ae71');
-    // Parked aircraft at stands; enlarged modestly for the airport overview.
-    m.push(...transformed(planeMesh(skin,'passenger'),300,5.1,120,-Math.PI/2,0,0,1.4));
-    m.push(...transformed(planeMesh('#cbd9bf','cargo'),300,5.1,-10,-Math.PI/2,0,0,1.4));
+    // The airliners at stands 120 and -10 are live traffic (see TRAFFIC below), drawn each frame.
     // Rescue boat wherever the map puts open water — but only if that spot is still water (the wider
     // airport zone turns some old boat moorings into land, and a boat must never sit among the runways).
     if(map.boat&&!onLand(map,map.boat[0],map.boat[1])&&!onRunway(map.boat[0],map.boat[1])){const [bx,bz]=map.boat;box(m,bx,-3,bz,12,5,36,'#e4d6ad');box(m,bx,2,bz+3,7,7,14,'#f7efda');box(m,bx,9,bz+3,1,8,1,'#667a6b');}
@@ -292,6 +290,74 @@
     for(const f of m)if(f.v.every(p=>p[1]<=3))f.ground=Math.max(...f.v.map(p=>p[1]));
     if(ox||oz)for(const f of m)f.v=f.v.map(p=>[p[0]+ox,p[1],p[2]+oz]);
     return m;
+  }
+  // ---- Airport traffic ----------------------------------------------------------------------------
+  // A journey is a polyline of {x,y,z,v} points: v is the speed (m/s) at that point and y the height
+  // above the apron. Speed changes linearly along each leg, headings ease through corners, and a point
+  // marked back:true is reached in reverse (pushback), so the nose points away from the motion.
+  function journey(points){
+    const legs=[];let t=0;
+    for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i],d=Math.hypot(b.x-a.x,(b.y||0)-(a.y||0),b.z-a.z);if(d<.01)continue;
+      const va=Math.max(.3,a.v),vb=Math.max(.3,b.v),dt=2*d/(va+vb);legs.push({a,b,d,t0:t,dt,va,vb,yaw:Math.atan2(b.x-a.x,-(b.z-a.z))+(b.back?Math.PI:0)});t+=dt;}
+    return {legs,duration:t};
+  }
+  // Long ground legs get a fast straight between slow corners, so aircraft brake into every turn.
+  function cruise(points,fast=24,corner=8){
+    const out=[points[0]];
+    for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i],d=Math.hypot(b.x-a.x,b.z-a.z);
+      if(!(a.y||0)&&!(b.y||0)&&a.v<=fast&&b.v<=fast&&!b.back&&d>140){const k=60/d;out.push({x:a.x+(b.x-a.x)*k,y:0,z:a.z+(b.z-a.z)*k,v:fast},{x:b.x-(b.x-a.x)*k,y:0,z:b.z-(b.z-a.z)*k,v:fast});}
+      out.push(b);}
+    return out;
+  }
+  // Where a ground route doubles back on itself, swing out in a teardrop instead of spinning on the spot.
+  function loops(points,r=22){
+    const out=[points[0]];
+    for(let i=1;i<points.length-1;i++){const a=out[out.length-1],b=points[i],c=points[i+1];out.push(b);
+      if((b.y||0)||(c.y||0)||b.back||c.back)continue;
+      const li=Math.hypot(b.x-a.x,b.z-a.z),lo=Math.hypot(c.x-b.x,c.z-b.z);if(li<1||lo<1)continue;
+      const ix=(b.x-a.x)/li,iz=(b.z-a.z)/li,ox=(c.x-b.x)/lo,oz=(c.z-b.z)/lo;if(ix*ox+iz*oz>-.7)continue;
+      const sx=-iz,sz=ix,rr=b.r||r;for(let k=1;k<=6;k++){const th=k/6*Math.PI;out.push({x:b.x+ix*Math.sin(th)*rr+sx*(1-Math.cos(th))*rr,y:0,z:b.z+iz*Math.sin(th)*rr+sz*(1-Math.cos(th))*rr,v:5});}}
+    out.push(points[points.length-1]);return out;
+  }
+  function poseAt(j,t){
+    const legs=j.legs;if(!legs.length)return null;t=Math.max(0,Math.min(j.duration,t));
+    let i=legs.findIndex(l=>t<=l.t0+l.dt);if(i<0)i=legs.length-1;
+    const l=legs[i],u=t-l.t0,acc=(l.vb-l.va)/l.dt,s=Math.max(0,Math.min(l.d,l.va*u+.5*acc*u*u)),f=s/l.d;
+    const turn=(a,b,k)=>a+Math.atan2(Math.sin(b-a),Math.cos(b-a))*k,R=Math.min(12,l.d/2);
+    let yaw=l.yaw;
+    if(s<R&&i>0)yaw=turn(turn(legs[i-1].yaw,l.yaw,.5),l.yaw,s/R);
+    else if(l.d-s<R&&i<legs.length-1)yaw=turn(l.yaw,turn(l.yaw,legs[i+1].yaw,.5),1-(l.d-s)/R);
+    const ya=l.a.y||0,yb=l.b.y||0,pitch=Math.atan2(yb-ya,Math.hypot(l.b.x-l.a.x,l.b.z-l.a.z)||1)*(l.b.back?-1:1);
+    return {x:l.a.x+(l.b.x-l.a.x)*f,y:ya+(yb-ya)*f,z:l.a.z+(l.b.z-l.a.z)*f,yaw,pitch,airborne:ya>0||yb>0};
+  }
+  // Taxi from the apron lane to the runway, take off to the north and climb away out of sight.
+  function departureRoute(isle,rw,from){
+    const C=root.SkyCore,T=root.SkyNavigation.taxi(C,isle,rw),at=lz=>C.runwayToWorld(isle,rw,0,lz),lz0=rw.half-120;
+    return journey([...cruise(loops([...from,...T.slice(2,5).map(p=>({x:p.x,z:p.z,y:0,v:8})),{...at(lz0),y:0,v:3}])),{...at(lz0-800),y:0,v:70},{...at(lz0-1700),y:90,v:78},{...at(lz0-4700),y:450,v:88},{...at(lz0-11000),y:950,v:100}]);
+  }
+  // Fly a straight-in approach from the south, land, U-turn at the end of the rollout and taxi back.
+  function arrivalRoute(isle,rw,to){
+    const C=root.SkyCore,T=root.SkyNavigation.taxi(C,isle,rw),at=(lz,lx=0)=>C.runwayToWorld(isle,rw,lx,lz);
+    const td=rw.half-220,stop=Math.max(-rw.half+120,td-950);
+    return journey([{...at(rw.half+11000),y:950,v:100},{...at(rw.half+3200),y:230,v:76},{...at(rw.half+300),y:22,v:62},...cruise(loops([{...at(td),y:0,v:56},{...at(stop),y:0,v:8,r:13},{...at(rw.half-30,26),y:0,v:8},{x:T[4].x,z:T[4].z,y:0,v:8},{x:T[3].x,z:T[3].z,y:0,v:8},{x:T[2].x,z:T[2].z,y:0,v:8},...to]))]);
+  }
+  // A repeating day at a stand: parked, push back and depart, away, then arrive and park again.
+  function trafficCycle(out,back,parked,away){return {out,back,parked,away,period:parked+out.duration+away+back.duration};}
+  function cyclePose(c,t,park){
+    t=((t%c.period)+c.period)%c.period;if(t<c.parked)return {...park,parked:true};t-=c.parked;
+    if(t<c.out.duration)return poseAt(c.out,t);t-=c.out.duration;if(t<c.away)return null;t-=c.away;
+    return poseAt(c.back,t)||{...park,parked:true};
+  }
+  // The two airliners on the east apron: stand, livery, runway, and how far into its day each starts.
+  const TRAFFIC=[{z:120,type:'passenger',runway:1,offset:0,parked:150,away:110},{z:-10,type:'cargo',color:'#cbd9bf',runway:2,offset:.55,parked:120,away:140}];
+  function trafficFor(isle){
+    const key=isle.map.id+':'+JSON.stringify(isle.buildings||{});if(isle._traffic?.key===key)return isle._traffic.list;
+    const rws=root.SkyCore.runwaysFor(isle);
+    const list=TRAFFIC.map(p=>{const rw=rws[p.runway]||rws[0],zs=p.z;
+      const out=departureRoute(isle,rw,[{x:300,z:zs,y:0,v:.4},{x:286,z:zs,y:0,v:2,back:true},{x:272,z:zs,y:0,v:.4,back:true},{x:264,z:zs+12,y:0,v:8}]);
+      const back=arrivalRoute(isle,rw,[{x:260,z:zs+16,y:0,v:8},{x:272,z:zs,y:0,v:4},{x:300,z:zs,y:0,v:.3}]);
+      const cycle=trafficCycle(out,back,p.parked,p.away);return {...p,cycle,park:{x:300,y:0,z:zs,yaw:Math.PI/2,pitch:0}};});
+    isle._traffic={key,list};return list;
   }
   // Spatially indexed triangles come from the rendered scenery, including decorative meshes.
   const COLLISION_CACHE=new Map(),COLLISION_CELL=160;
@@ -363,7 +429,7 @@
       if(sig!==this.signature){
         this.chunks=layout.map(i=>({x:i.x,z:i.z,faces:buildWorld(i.buildings,state.skin,i.map,i.x,i.z)}));
         const T=TERRAIN[layout[0].map.terrain]||TERRAIN.island,extent=Math.max(12000,...layout.map(i=>Math.max(Math.abs(i.x),Math.abs(i.z))+9000));
-        this.ocean=buildOcean(T,extent);this.signature=sig;this.terrain=layout[0].map.terrain;this.map=layout[0].map;
+        this.ocean=buildOcean(T,extent);this.signature=sig;this.terrain=layout[0].map.terrain;this.map=layout[0].map;this.layout=layout;
       }
       if(this.planeColor!==state.skin){this.plane=planeMesh(state.skin);this.planeColor=state.skin;}
     }
@@ -376,7 +442,7 @@
       const skyColors=this.map?.sky||T.sky;
       const sky=ctx.createLinearGradient(0,0,0,h);sky.addColorStop(0,storm?'#859d9d':sunset?'#bdc5bc':skyColors[0]);sky.addColorStop(.7,storm?'#b2bbb0':sunset?'#efdab3':skyColors[1]);sky.addColorStop(1,storm?'#91b7a6':skyColors[2]);ctx.fillStyle=sky;ctx.fillRect(0,0,w,h);
       let camera,target,rollUp=[0,1,0];
-      if(!flight&&mode===6&&look){camera=[look.x,4,look.z];target=[look.x+Math.sin(look.yaw)*30,4+Math.sin(look.pitch||0)*20,look.z-Math.cos(look.yaw)*30];}
+      if(!flight&&mode===6&&look){const eye=look.eye??4;camera=[look.x,eye,look.z];target=[look.x+Math.sin(look.yaw)*30,eye+Math.sin(look.pitch||0)*20,look.z-Math.cos(look.yaw)*30];}
       else if(!flight){camera=mode===5?[2900,3300,3600]:mode===4?[1420,1120,1590]:mode===3?[1170,1160,1450]:[570,125,245];target=mode===5?[-500,0,-900]:mode===4?[40,0,-70]:mode===3?[-490,0,210]:[384,9,-20];}
       else{
         const f=flight;const sy=Math.sin(f.yaw),cy=Math.cos(f.yaw);
@@ -397,7 +463,7 @@
         }
       }
       const forward=norm(sub(target,camera)),right=norm(cross(forward,rollUp)),up=cross(right,forward);
-      const focal=(flight?((mode===1||mode===3)?.64:.78):mode===5?1.25:1.07)*Math.min(w,h*1.45);
+      const focal=(flight?((mode===1||mode===3)?.64:.78):mode===5?1.25:1.07)*Math.min(w,h*1.45)*(!flight&&mode===6&&look?.zoom||1);
       const project=p=>{const d=sub(p,camera);return[dot(d,right),-dot(d,up),dot(d,forward)];};
       const screen=p=>[w/2+p[0]/p[2]*focal,h*.5+p[1]/p[2]*focal];
       this.projection={camera,project,screen,focal};
@@ -409,9 +475,14 @@
       for(const chunk of this.chunks)if(Math.hypot(chunk.x-camera[0],chunk.z-camera[2])<far+6000)faces.push(...chunk.faces);
       if(!flight&&mode===6){
         if(look?.cabin)faces.length=0;
-        if(root.SkyWork)faces.push(...root.SkyWork.scene(clock,look));
+        if(root.SkyWork)faces.push(...root.SkyWork.scene(clock,look,state));
       }
       if(!flight&&mode===3)faces.push(...transformed(jetMesh('#ddb265'),440,610+Math.sin(clock*.3)*7,610,-.55,.08,-.09,15));
+      // Live airport traffic. During the player's own flight the airliners stay parked at their stands.
+      if(root.SkyCore&&root.SkyNavigation)for(const chunk of (flight?this.layout||[]:(this.layout||[]).slice(0,1))){
+        for(const p of trafficFor(chunk)){const pose=flight?{...p.park,parked:true}:cyclePose(p.cycle,clock+p.offset*p.cycle.period,p.park);if(!pose)continue;
+          const key=p.type+(p.color||state.skin);this.trafficMesh=this.trafficMesh||{};if(!this.trafficMesh[key])this.trafficMesh[key]=planeMesh(p.color||state.skin,p.type);
+          faces.push(...transformed(this.trafficMesh[key],chunk.x+pose.x,5.1+pose.y,chunk.z+pose.z,pose.yaw,pose.pitch,0,1.4));}}
       if(flight){
         if(mode!==1&&mode!==3){faces.push(...transformed(this.plane.filter(f=>flight.gear||!f.gear),flight.x,flight.y+2,flight.z,flight.yaw,flight.pitch,flight.roll,1));
           if(flight.gear&&!root.SkyAssets){const wheel=[];box(wheel,-1,-1.4,.4,.3,.8,.7,'#3e534d');box(wheel,1,-1.4,.4,.3,.8,.7,'#3e534d');box(wheel,0,-1.2,-3,.3,.8,.7,'#3e534d');faces.push(...transformed(wheel,flight.x,flight.y+2,flight.z,flight.yaw,flight.pitch,flight.roll));}
@@ -571,5 +642,5 @@
     }
     for(const isle of islands){const lw=Math.max(1.5,3*scale/.024);const rws=root.SkyCore?.runwaysFor?.(isle)||[{cx:0,cz:0,cos:1,sin:0,half:isle.runwayHalf}];for(const rw of rws){const ex=(lx,lz)=>root.SkyCore?.runwayToWorld?root.SkyCore.runwayToWorld(isle,rw,lx,lz):{x:isle.x+lx,z:isle.z+lz};const e0=ex(0,-rw.half),e1=ex(0,rw.half),a=pos(e0.x,e0.z),b=pos(e1.x,e1.z);ctx.lineCap='butt';ctx.strokeStyle='#24332f';ctx.lineWidth=lw+1.5;ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();ctx.strokeStyle='#eef3d8';ctx.lineWidth=Math.max(.8,lw*.45);ctx.beginPath();ctx.moveTo(...a);ctx.lineTo(...b);ctx.stroke();}}if(islands.length>1){ctx.font=`${Math.max(8,Math.round(w/22))}px monospace`;ctx.textAlign='center';for(let i=0;i<islands.length;i++){const isle=islands[i],c=pos(isle.x,isle.z);if(scale<.0032&&i&&i!==flight.finish)continue;if(c[0]<-40||c[0]>w+40||c[1]<-10||c[1]>w+10)continue;const full=(isle.map.name||'').toUpperCase(),label=scale>=.0075?full:full.split(/[\s&]+/)[0],drop=Math.max(6,(isle.map.land?.[0]?.[3]||1350)*scale+9);ctx.fillStyle='#0e2a2499';const tw=ctx.measureText(label).width;ctx.fillRect(c[0]-tw/2-2,c[1]+drop-8,tw+4,10);ctx.fillStyle=i===0?'#f4e7a8':i===flight.finish&&flight.finish>0?'#c7f0a2':'#e2ecd0';ctx.fillText(label,c[0],c[1]+drop);}}
     ctx.strokeStyle='#acc49777';ctx.lineWidth=1;ctx.beginPath();(flight.navPath||flight.gates).forEach((g,i)=>{const p=pos(g.x,g.z);if(!i)ctx.moveTo(...p);else ctx.lineTo(...p);});ctx.stroke();if(flight.onGround&&flight.taxiPath){ctx.strokeStyle='#f6d786';ctx.beginPath();flight.taxiPath.forEach((g,i)=>{const p=pos(g.x,g.z);i?ctx.lineTo(...p):ctx.moveTo(...p);});ctx.stroke();}flight.gates.forEach((g,i)=>{ctx.fillStyle=i<flight.gate?'#607f59':i===flight.gate?'#e8f7a6':'#9ab989';ctx.beginPath();ctx.arc(...pos(g.x,g.z),i===flight.gate?4:2,0,TAU);ctx.fill();});if(flight.ghost&&!flight.ghost.finished){ctx.fillStyle='#7fc4d8';ctx.beginPath();ctx.arc(...pos(flight.ghost.x,flight.ghost.z),3,0,TAU);ctx.fill();}const p=pos(flight.x,flight.z);ctx.save();ctx.translate(...p);ctx.rotate(flight.yaw);ctx.fillStyle='#fff9e1';ctx.beginPath();ctx.moveTo(0,-6);ctx.lineTo(-4,5);ctx.lineTo(0,2);ctx.lineTo(4,5);ctx.fill();ctx.restore();ctx.font='9px monospace';ctx.fillStyle='#cbd9b6';ctx.textAlign='left';ctx.fillText('N ↑',10,16);ctx.fillText((flight.mapLabel||'SEABREEZE').slice(0,16),10,w-10);if(flight.mapNote){ctx.textAlign='right';ctx.fillText(flight.mapNote.slice(0,12),w-8,16);}}
-  root.SkyWorld={Renderer,drawMap,coastFor,topDownFor,buildWorld,sceneryCollision,geometry:{box,face,transformed}};
+  root.SkyWorld={Renderer,drawMap,coastFor,topDownFor,buildWorld,sceneryCollision,geometry:{box,face,transformed},traffic:{journey,poseAt,departureRoute,arrivalRoute,trafficCycle,cyclePose}};
 })(globalThis);

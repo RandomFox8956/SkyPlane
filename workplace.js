@@ -16,16 +16,26 @@
 
   const blocks=[];
 
-  const desks={checkin:[410,34],security:[386,-15],engineer:[374,158],ground:[319,214],pilot:[409,-91],manager:[409,-134]};
+  const desks={checkin:[410,34],security:[386,-15],engineer:[374,158],ground:[319,214],pilot:[409,-91],manager:[409,-134],atc:[352,-153]};
 
   // Security has no front desk: the scanner belt is the counter, with a tray stand and console beside it.
   for(const [role,[x,z]] of Object.entries(desks))if(role!=='security')blocks.push({x,z,w:role==='ground'?5:4.2,d:1.5});
 
   const secTray={x:388.6,z:-15.7},secConsole={x:390.6,z:-15.5};
 
+
   blocks.push({x:384.6,z:-16.4,w:5.5,d:3.8},{x:secTray.x,z:secTray.z,w:1.4,d:1.2},{x:secConsole.x,z:secConsole.z,w:1.7,d:.8},{x:406.3,z:33,w:2.6,d:4},{x:314,z:212,w:2.6,d:3.4},{x:322,z:211,w:2.6,d:3.4},{x:303,z:226,w:12,d:2.8});
 
   const clear=(x,z)=>A.canWalk(x,z)&&!blocks.some(b=>Math.abs(x-b.x)<b.w/2+.45&&Math.abs(z-b.z)<b.d/2+.45);
+
+  // The control tower cab sits on top of the tower at (500, -265). Its equipment is laid out in a local
+  // frame facing -z (like every desk) and then turned to face west, out over the runways.
+  const TOWER={x:500,z:-265};
+  const towerFloor=state=>110*(1+((state&&state.buildings&&state.buildings.radar)||0)*.04);
+  const toTower=(x,z)=>[TOWER.x+z,TOWER.z-x];
+  function towerTurn(m,first){for(let i=first;i<m.length;i++){const f=m[i];m[i]={...f,v:f.v.map(p=>[TOWER.x+p[2],p[1],TOWER.z-p[0]]),n:f.n&&f.n.map(n=>[n[2],n[1],-n[0]])};}}
+  function towerClear(x,z){const lz=x-TOWER.x,lx=TOWER.z-z;if(Math.hypot(lx,lz)>17.5)return false;if(lz<-15.7&&Math.abs(lx)<3.6)return false;if(Math.abs(lx)<1.7&&Math.abs(lz)<1.7)return false;if(Math.abs(lx)>3.9&&Math.abs(lx)<4.8&&lz<-15.3&&lz>-16.6)return false;return true;}
+  function towerSpawn(state){const [x,z]=toTower(0,-10.9);return {x,z,yaw:-Math.PI/2,pitch:-.1,tower:true,eye:towerFloor(state)+2};}
 
   function initGrid(){
 
@@ -87,7 +97,7 @@
 
       const p={id:i,name:names[i%names.length],...p0,yaw:0,phase:i*.8,speed:1.15+(i%4)*.16,path:[],wait:1+i%5,stop:i%areas.length,color:palette[i%palette.length],skin:['#bc8d6c','#e1b496','#755442'][i%3],moving:false};people.push(p);}
 
-    for(const [i,s] of A.stations.entries()){const p0=point(nearest(s.x+3,s.z+2));workers.push({id:30+i,name:['Mina','Louis','Amara','Ben','Sofia','Noah','Eva'][i],role:s.role,...p0,home:p0,yaw:.6,phase:i,speed:.8,path:[],wait:4+i,color:['ground','engineer'].includes(s.role)?'#d5b950':'#274b64',skin:i%2?'#986647':'#d3a382',moving:false});}
+    for(const [i,s] of A.stations.entries()){const p0=point(nearest(s.x+3,s.z+2));workers.push({id:30+i,name:['Mina','Louis','Amara','Ben','Sofia','Noah','Eva','Hana'][i%8],role:s.role,...p0,home:p0,yaw:.6,phase:i,speed:.8,path:[],wait:4+i,color:['ground','engineer'].includes(s.role)?'#d5b950':'#274b64',skin:i%2?'#986647':'#d3a382',moving:false});}
 
   }
 
@@ -169,7 +179,7 @@
   function billboard(m,x,y,z,w,text,look,h=.24){const dx=(look?.x??x)-x,dz=(look?.z??z+1)-z,l=Math.hypot(dx,dz)||1,rx=dz/l*w/2,rz=-dx/l*w/2;m.push({v:[[x-rx,y+h,z-rz],[x+rx,y+h,z+rz],[x+rx,y,z+rz],[x-rx,y,z-rz]],c:'#12333b',tc:'#f4efd7',t:text});}
 
   // Floating feedback: score pop-ups, speech bubbles, sparks and confetti live in the 3D world.
-  function anchor(at){const o=typeof at==='string'?objects.find(o=>o.id===at):at;if(o&&o.x!==undefined)return {x:o.x,y:(o.y??3.4)+.45,z:o.z};if(active?.inCabin)return {x:0,y:4.4,z:-3};if(customer?.serving)return {x:customer.x,y:4.85,z:customer.z};const s=active?.station;return s?{x:s.x,y:4.6,z:s.z}:{x:0,y:4,z:0};}
+  function anchor(at){const o=typeof at==='string'?objects.find(o=>o.id===at):at;if(o&&o.x!==undefined)return {x:o.x,y:(o.y??3.4)+.45,z:o.z};if(active?.inCabin)return {x:0,y:4.4,z:-3};if(active?.inTower){const [x,z]=toTower(0,-16);return {x,y:towerFloor(active.state)+3.4,z};}if(customer?.serving)return {x:customer.x,y:4.85,z:customer.z};const s=active?.station;return s?{x:s.x,y:4.6,z:s.z}:{x:0,y:4,z:0};}
   function popup(text,at){if(!text)return;effects.push({kind:'pop',text:String(text).slice(0,34),...anchor(at),t0:time,cabin:!!active?.inCabin});}
   function burst(at,count=26,colors=['#f6d365','#fda085','#9be15d','#6fc3df','#f7f3e3','#e27d9b'],speed=2.4){const p=anchor(at);for(let i=0;i<count;i++){const a=Math.random()*Math.PI*2,u=.3+Math.random()*.7;effects.push({kind:'bit',x:p.x,y:p.y-.3,z:p.z,vx:Math.cos(a)*speed*u,vy:1.2+Math.random()*speed,vz:Math.sin(a)*speed*u,c:colors[i%colors.length],t0:time,life:1.4+Math.random()*1.3,cabin:!!active?.inCabin});}}
   function speech(text,at){if(!text)return;let p=anchor(at);const who=customer||lastCustomer;if(!at&&who&&!active?.inCabin)p={x:who.x,y:4.85,z:who.z};else if(typeof at==='string'&&at.startsWith('seat'))p={...p,y:4.25};effects=effects.filter(e=>!(e.kind==='speech'&&Math.hypot(e.x-p.x,e.z-p.z)<.5));effects.push({kind:'speech',text:String(text).slice(0,44),...p,t0:time,life:4.2,cabin:!!active?.inCabin});}
@@ -217,7 +227,9 @@
 
     if(staticTerminal)return staticTerminal;const m=[],{box}=geom();
 
-    for(const [role,[x,z]] of Object.entries(desks)){if(role==='security')continue;box(m,x,2,z,role==='ground'?5:4.2,1.15,1.5,'#7a7164');box(m,x,3.15,z,4.5,.13,1.7,'#d4d7cd');box(m,x+1.3,3.3,z-.3,.1,.3,.1,'#344d56');box(m,x+1.3,3.55,z-.3,1.9,1.1,.09,'#18363f');label(m,x+1.3,4.43,z-.245,1.6,role.toUpperCase(),undefined,undefined,.17);box(m,x+1.3,3.3,z+.23,.85,.04,.27,'#344852');}
+    // The ATC lobby holds the lift up to the control tower.
+    {const [x,z]=desks.atc;box(m,x,2,z-.2,4.2,3.6,1.1,'#5d6f73');for(const s of [-1,1])box(m,x+s*.72,2,z+.36,1.4,3.1,.06,'#a9b8b6');box(m,x,5.6,z+.36,4.2,.4,.06,'#18363f');label(m,x,5.66,z+.4,3.6,'LIFT · CONTROL TOWER',undefined,undefined,.26);}
+    for(const [role,[x,z]] of Object.entries(desks)){if(role==='security'||role==='atc')continue;box(m,x,2,z,role==='ground'?5:4.2,1.15,1.5,'#7a7164');box(m,x,3.15,z,4.5,.13,1.7,'#d4d7cd');box(m,x+1.3,3.3,z-.3,.1,.3,.1,'#344d56');box(m,x+1.3,3.55,z-.3,1.9,1.1,.09,'#18363f');label(m,x+1.3,4.43,z-.245,1.6,role.toUpperCase(),undefined,undefined,.17);box(m,x+1.3,3.3,z+.23,.85,.04,.27,'#344852');}
 
     box(m,409.1,3.28,34.2,1.15,.12,.55,'#243a42');box(m,409.1,3.4,34.2,.82,.025,.38,'#89bcc0');
 
@@ -319,6 +331,8 @@
   function equipment(m,look){
 
     objects=[];if(!active)return;const {role,job:j,station:s}=active,has=k=>j?.done.includes(k),add=(id,x,y,z,text,action,kind,detail,w)=>interactable(m,id,x,y,z,text,action,kind,detail,w);
+
+    if(look?.tower){if(role==='atc')towerEquipment(m,look);return;}
 
     if(look?.cabin){
 
@@ -488,6 +502,10 @@
           a.options.forEach((o,i)=>add('squawk'+i,ax-.45,4.1-i*.47,z,'Squawk '+o,'readback:'+i,'button','Read back the squawk code ATC gave you.',1.4));add('sayagain',ax+.8,3.63,z,'Say again','clearance','button','Ask ATC to repeat the clearance. A first-time readback without repeats earns a bonus.',.8);}
         else label(m,ax,4.4,z,2.2,'READBACK CORRECT ✓',undefined,undefined,.28);}
 
+    }else if(role==='atc'){
+
+      add('tower',x,3.7,z+.45,'Take the lift to the tower','@tower','button','Ride up to the control tower cab to work the shift.',2.4);
+
     }else if(role==='manager'){
 
       add('board',x+1,3.7,z,'Review departures','@operations','button','Review airport staffing and departures.',1.8);
@@ -512,18 +530,45 @@
 
   }
 
-  // The turnaround aircraft. It sits on its stand until ground crew signal ready, then the tug pushes it back.
-  function aircraft(m){
-    const {box,transformed}=geom(),j=active?.role==='ground'?active.job:null;
-    if(!aircraftLocal){aircraftLocal=root.SkyAssets?.cargo?[...root.SkyAssets.cargo]:[];for(const s of [-1,1]){box(aircraftLocal,1.6,-.75,s*1.5,.15,1.3,2.4,'#18313c');box(aircraftLocal,1.85,-.78,s*1.5,.5,.06,2.4,'#a1b3ac');}}
-    let x=303,z=226,yaw=Math.PI/2,k=0;
-    if(j?.releasedAt){const e=Math.max(0,Math.min(1,((J.time()-j.releasedAt)/1000-1.5)/9));k=e*e*(3-2*e);x=303-13*k;z=226+4*k*k;yaw=Math.PI/2-.5*k;}
-    if(k===0){aircraftHome=aircraftHome||transformed(aircraftLocal,303,4,226,Math.PI/2);m.push(...aircraftHome);}else m.push(...transformed(aircraftLocal,x,4,z,yaw));
-    const sy=Math.sin(yaw),cy=Math.cos(yaw),at=(fwd,side=0)=>[x+fwd*sy+side*cy,z-fwd*cy+side*sy];
-    // Anti-collision beacons flash once pushback clearance is armed.
-    const armed=j&&(j.signalAt||j.done.includes('tug')),on=armed&&(time*1.6)%1<.22;for(const [fx,y] of [[0,5.9],[0,2.35]]){const [bx,bz]=at(fx);orb(m,bx,y,bz,.13,.1,.13,on?'#ff3b2f':'#6a2a26');}
-    if(j?.done.includes('tug')){const [tx,tz]=at(7.3),[nx,nz]=at(5.1),tug=[];box(tug,0,2.05,0,1.2,.55,1.9,'#e2b93b');box(tug,0,2.6,.35,.95,.5,.7,'#2c4a55');for(const dx of [-.62,.62])for(const dz of [-.6,.6])orb(tug,dx,2.18,dz,.13,.18,.18,'#232a2d');m.push(...transformed(tug,tx,0,tz,yaw));limb(m,[tx-(tx-nx)*.25,2.35,tz-(tz-nz)*.25],[nx,2.25,nz],.08,'#b9c3bb');
-      const lamp=(time*3)%1<.5;const [lx,lz]=at(7.3);orb(m,lx,3.25,lz,.09,.09,.09,lamp?'#ffb238':'#7a5a2a');}
+  // The turnaround aircraft at gate A1. During a ground-crew shift it waits on its stand with the baggage
+  // loaders against its holds; once the crew signal ready the tug pushes it back, the loaders stay on the
+  // apron, and it taxis out and takes off. Outside ground shifts it flies its own departures and arrivals.
+  let departure=null,a1=null;
+  const standPose={x:303,y:0,z:226,yaw:Math.PI/2,pitch:0,parked:true};
+  function a1Plan(state){
+    const C=root.SkyCore,T=root.SkyWorld.traffic;if(!state||!C||!T||!root.SkyNavigation)return null;
+    const isle=C.homeLayout(state)[0],key=isle.map.id+':'+JSON.stringify(isle.buildings||{});if(a1?.key===key)return a1;
+    const push=[];
+    for(let i=0;i<=6;i++){const th=i/6*Math.PI/2;push.push({x:303-14*Math.sin(th),z:212+14*Math.cos(th),y:0,v:i===0||i===6?.3:1.6,back:i>0});}
+    // Depart from whichever runway is the shortest taxi away.
+    const options=C.runwaysFor(isle).map(rw=>({rw,out:T.departureRoute(isle,rw,[...push,{x:289,z:236,y:0,v:8},{x:262,z:250,y:0,v:10}])}));
+    const lift=o=>(o.out.legs.find(l=>(l.b.y||0)>0)||{t0:o.out.duration}).t0,{rw,out}=options.reduce((a,o)=>lift(o)<lift(a)?o:a);
+    const back=T.arrivalRoute(isle,rw,[{x:260,z:240,y:0,v:8},{x:276,z:226,y:0,v:4},{x:303,z:226,y:0,v:.3}]);
+    const forward=out.legs.find(l=>!l.b.back);
+    return a1={key,out,back,pushTime:forward?forward.t0:0,cycle:T.trafficCycle(out,back,100,90)};
+  }
+  function aircraft(m,clock,state){
+    const {box,transformed}=geom(),j=active?.role==='ground'?active.job:null,now=J.time(),plan=a1Plan(state||active?.state);
+    if(!aircraftLocal){aircraftLocal=root.SkyAssets?.cargo?[...root.SkyAssets.cargo]:[];}
+    if(j?.releasedAt&&departure?.t0!==j.releasedAt)departure={t0:j.releasedAt};
+    const planes=[];let nearStand=false;
+    if(departure){const e=(now-departure.t0)/1000-1.5;
+      if(plan&&e<plan.out.duration){planes.push({pose:e<0?standPose:root.SkyWorld.traffic.poseAt(plan.out,e),tug:e<plan.pushTime+.5,armed:true});nearStand=e<plan.pushTime+3;}
+      else if(!plan&&e<10)planes.push({pose:standPose,tug:true,armed:true});else departure=null;}
+    if(j&&!j.releasedAt){if(!nearStand)planes.push({pose:standPose,loaders:true,tug:j.done.includes('tug'),armed:!!(j.signalAt||j.done.includes('tug'))});}
+    else if(!j&&!departure){const p=plan?root.SkyWorld.traffic.cyclePose(plan.cycle,clock||0,standPose):standPose;if(p)planes.push({pose:p,loaders:!!p.parked,armed:!p.parked});}
+    for(const {pose,loaders,tug,armed} of planes){
+      const {x,z,yaw}=pose,y=4+pose.y;
+      if(pose.parked){aircraftHome=aircraftHome||transformed(aircraftLocal,303,4,226,Math.PI/2);m.push(...aircraftHome);}
+      else m.push(...transformed(aircraftLocal,x,y,z,yaw,pose.pitch||0,0,1));
+      const sy=Math.sin(yaw),cy=Math.cos(yaw),at=(fwd,side=0)=>[x+fwd*sy+side*cy,z-fwd*cy+side*sy];
+      // Belt loaders sit against the two holds on the stand; they are apron equipment, not part of the aircraft.
+      if(loaders)for(const s of [-1,1]){const [lx,lz]=at(-s*1.5,1.6),[rx,rz]=at(-s*1.5,1.85);box(m,lx,3.25,lz,2.4,1.3,.15,'#18313c');box(m,rx,3.22,rz,2.4,.06,.5,'#a1b3ac');}
+      // Anti-collision beacons flash once pushback clearance is armed and while the aircraft is moving.
+      const on=armed&&(time*1.6)%1<.22;for(const [fx,by] of [[0,5.9],[0,2.35]]){const [bx,bz]=at(fx);orb(m,bx,by+pose.y,bz,.13,.1,.13,on?'#ff3b2f':'#6a2a26');}
+      if(tug){const [tx,tz]=at(7.3),[nx,nz]=at(5.1),t=[];box(t,0,2.05,0,1.2,.55,1.9,'#e2b93b');box(t,0,2.6,.35,.95,.5,.7,'#2c4a55');for(const dx of [-.62,.62])for(const dz of [-.6,.6])orb(t,dx,2.18,dz,.13,.18,.18,'#232a2d');m.push(...transformed(t,tx,0,tz,yaw));limb(m,[tx-(tx-nx)*.25,2.35,tz-(tz-nz)*.25],[nx,2.25,nz],.08,'#b9c3bb');
+        const lamp=(time*3)%1<.5;orb(m,tx,3.25,tz,.09,.09,.09,lamp?'#ffb238':'#7a5a2a');}
+    }
   }
 
   // Main-gear strut, scissor jack and wheel for the maintenance bay. Everything moves: the jack lifts,
@@ -541,23 +586,91 @@
       if(j)for(const b of j.bolts){const px=nx+(b.id%2?.14:-.14),py=y+(Math.floor(b.id/2)?.14:-.14),nut=[];box(nut,0,-.045,0,.09,.09,.05,b.done?'#a8d46f':b.gauge?'#f0b545':'#9aa3a6');m.push(...transformed(nut,px,py,z+.3,0,0,b.gauge?time*9:b.done?.4:0));}}
   }
 
-  function scene(clock,look){
+  // Furniture of the tower cab: the lift core, the controllers' console and the radar pedestal.
+  let towerCache=null;
+  function towerCab(state){
+    const F=towerFloor(state);if(towerCache?.F===F)return towerCache.m;const m=[],{box}=geom();
+    box(m,0,F,0,2.8,3.4,2.8,'#5d6f73');for(const s of [-1,1])box(m,s*.5,F,-1.42,.9,2.9,.05,'#a9b8b6');label(m,0,F+3.02,-1.44,2.2,'LIFT',undefined,undefined,.24);
+    // A low console keeps the window clear; the displays hang from the ceiling above the sight line.
+    box(m,0,F,-16.6,6.6,.8,1.1,'#3b4d55');box(m,0,F+.8,-16.55,6.8,.06,1.25,'#d4d7cd');box(m,0,F+2.4,-17.35,6.6,2.3,.08,'#18313a');
+    for(const x of [-3,3])limb(m,[x,F+4.7,-17.35],[x,F+12.5,-17.35],.05,'#8d9c9c');
+    for(const [x,t,w] of [[-2.35,'WIND',1.4],[0,'FLIGHT STRIPS',2.6],[2.35,'RUNWAYS',1.4]])label(m,x,F+4.4,-17.3,w,t,undefined,undefined,.2);
+    box(m,-4.3,F+2.4,-17.1,1.9,2,.06,'#1b2f37');limb(m,[-4.3,F+4.4,-17.1],[-4.3,F+12.5,-17.1],.05,'#8d9c9c');label(m,-4.3,F+4.1,-17.05,1.7,'APPROACH RADAR',undefined,undefined,.2);
+    for(const x of [-4.35,4.35])box(m,x,F,-15.95,.5,1.2,.5,'#344d56');
+    towerTurn(m,0);towerCache={F,m};return m;
+  }
+  function towerEquipment(m,look){
+    const C=root.SkyCore,j=active.job,state=active.state,F=towerFloor(state),first=m.length,firstObj=objects.length,{box}=geom(),add=(id,x,y,z,text,action,kind,detail,w)=>interactable(m,id,x,y,z,text,action,kind,detail,w);
+    if(C&&state)j.runways=C.runwaysFor(C.homeLayout(state)[0]).map(r=>({name:r.name,deg:r.deg}));
+    const best=J.bestRunway(j),pend=J.pendingOf(j),sel=J.selectedOf(j),wind=j.wind||{from:0,kt:0};
+    // Wind dial: north is up; the arrow points in from the direction the wind blows from.
+    {const cx=-2.35,cy=F+3.65,a=wind.from*Math.PI/180;orb(m,cx,cy,-17.28,.4,.4,.02,'#0c2a22');for(let k=0;k<12;k++){const b=k/12*Math.PI*2;box(m,cx+Math.sin(b)*.36,cy+Math.cos(b)*.36,-17.26,.03,.03,.01,'#2f6b52');}
+      label(m,cx,cy+.43,-17.27,.18,'N',undefined,undefined,.1);limb(m,[cx+Math.sin(a)*.36,cy+Math.cos(a)*.36,-17.25],[cx,cy,-17.25],.05,'#f2c94c');orb(m,cx,cy,-17.25,.05,.05,.01,'#f2c94c');}
+    add('wind',-2.35,F+2.85,-17.22,`WIND ${wind.from}° · ${wind.kt} KT`,'@read','button','Aircraft take off and land into the wind. Pick the runway whose number matches the wind direction.',1.4);
+    // Flight strips: one per aircraft calling you. Yellow frame = selected, red = MAYDAY.
+    if(!pend.length)label(m,0,F+3.7,-17.28,2.5,j.complete?'ALL TRAFFIC HANDLED':'NO TRAFFIC CALLING',undefined,undefined,.2);
+    pend.slice(0,5).forEach((r,i)=>{const y=F+4.05-i*.36,left=J.finalLeft(r);if(r.emergency||sel===r)box(m,0,y-.2,-17.31,2.74,.4,.02,r.emergency&&(time*3)%1<.5?'#e0513a':sel===r?'#f2c94c':'#8a2a24');
+      add('strip'+r.id,0,y,-17.22,`${r.emergency?'MAYDAY ':''}${r.callsign} · ${r.kind==='takeoff'?'DEPARTURE':'ARRIVAL '+Math.ceil(left)+'s'}`,'strip:'+r.id,'button',r.emergency?'Engine failure: clear this aircraft to land before anyone else.':r.kind==='takeoff'?'Holding short, ready for departure.':`On final approach: ${Math.ceil(left)} seconds from the runway.`,2.6);});
+    // Runway buttons set the runway in use; the light shows whether other traffic occupies it.
+    J.runwaysOf(j).slice(0,3).forEach((rw,i)=>{const y=F+4.05-i*.45,busy=J.occupied(j,i);
+      // Red frame: occupied by other traffic. Green frame: the runway in use.
+      if(busy||j.active===i)box(m,2.35,y-.21,-17.31,1.52,.42,.02,busy?((time*3)%1<.5?'#ff3b2f':'#8a2a24'):'#7ee06b');
+      add('rwy'+i,2.35,y,-17.22,`RWY ${rw.name}${busy?' · BUSY':j.active===i?' · IN USE':''}`,'runway:'+i,'button',busy?`Occupied by ${j.occupancy[i].traffic}.`:'Runway clear. Click to make it the runway in use.',1.4);});
+    // Approach radar: the runway in use and a blip for each arrival sliding down final.
+    {const rx=-4.3,ry=F+3.3,rz=-17.03;orb(m,rx,ry,rz,.72,.72,.02,'#0c2a22');const a=time*1.6;limb(m,[rx,ry,rz+.02],[rx+Math.cos(a)*.7,ry+Math.sin(a)*.7,rz+.02],.025,'#7cf0a0');box(m,rx-.02,ry-.3,rz+.01,.04,.6,.01,'#2f6b52');
+      for(const r of pend)if(r.kind==='landing'){const d=Math.min(1,(J.finalLeft(r)||0)/30);orb(m,rx,ry-.3+.3+d*.35,rz+.03,.05,.05,.01,r.emergency?'#ff3b2f':sel===r?'#f2c94c':'#58c26f');}}
+    // Controls along the front of the console.
+    add('clearTakeoff',-2.4,F+.97,-15.98,'Cleared for takeoff','clearTakeoff','button','Clear the selected departure onto the runway in use.',1.45);
+    add('clearLand',-.8,F+.97,-15.98,'Cleared to land','clearLand','button','Clear the selected arrival to land on the runway in use.',1.45);
+    add('goAround',.8,F+.97,-15.98,'Go around / hold','goAround','button','Send an arrival around (or keep a departure holding) while the runway is occupied.',1.45);
+    add('listen',2.4,F+.97,-15.98,'Say again','listen','button','Ask the selected aircraft to repeat its call.',1.3);
+    add('binoculars',-4.35,F+1.55,-15.66,look.zoom>1?'Lower binoculars':'Binoculars','@binoculars','button','Zoom in to watch the runways (B).',1.3);
+    add('towerExit',4.35,F+1.55,-15.66,'Lift to terminal','@towerExit','button','Ride the lift back down to the terminal.',1.3);
+    if(j.complete)add('next',0,F+4.72,-17.22,'Next tower shift','@next','button','Start another shift once the cooldown ends.',2.2);
+    towerTurn(m,first);for(let i=firstObj;i<objects.length;i++){const o=objects[i],[x,z]=toTower(o.x,o.z);objects[i]={...o,x,z,width:o.depth,depth:o.width};}
+  }
+  // What the controller sees out of the window: arrivals on final, departures holding short, traffic
+  // blocking a runway, and every clearance flown for real.
+  const meshes={};
+  function planeFaces(type){if(!meshes[type])meshes[type]=root.SkyAssets?.[type]||root.SkyAssets?.cargo||[];return meshes[type];}
+  function atcTraffic(m){
+    const C=root.SkyCore,T=root.SkyWorld?.traffic,j=active.job,state=active.state;if(!C||!T||!state||!j?.requests)return;
+    const {transformed}=geom(),isle=C.homeLayout(state)[0],rws=C.runwaysFor(isle),now=J.time(),best=J.bestRunway(j),inUse=j.active??best;
+    const at=(rw,lz,lx=0)=>C.runwayToWorld(isle,rw,lx,lz),yawOf=(a,b)=>Math.atan2(b.x-a.x,-(b.z-a.z));
+    const draw=(type,p,yaw,alt=0,pitch=0)=>m.push(...transformed(planeFaces(type),p.x,5.1+alt,p.z,yaw,pitch,0,1.4));
+    const finalPoint=(rw,left)=>{const lz=rw.half+300+Math.max(0,left)*55;return {...at(rw,lz),y:22+(lz-rw.half-300)*.075};};
+    const holdPoint=(rw,i)=>at(rw,rw.half-100+i*45,58);
+    let holding=0;
+    for(const r of J.pendingOf(j)){const rw=rws[inUse]||rws[0];
+      if(r.kind==='landing'){const p=finalPoint(rw,J.finalLeft(r));draw(r.aircraft,p,rw.rad,p.y,-.04);}
+      else{const p=holdPoint(rw,holding++);draw(r.aircraft,p,yawOf(p,at(rw,rw.half-100,0)));}}
+    (j.occupancy||[]).forEach((o,k)=>{if(!o||now>=o.until)return;const rw=rws[k];if(!rw)return;const f=Math.min(1,(now-o.from)/(o.until-o.from)),a=at(rw,rw.half*.25,-45),b=at(rw,rw.half*.25,75),p={x:a.x+(b.x-a.x)*f,z:a.z+(b.z-a.z)*f};draw('trainer',p,yawOf(a,b));});
+    for(const an of j.anims||[]){const rw=rws[an.runway]||rws[0];
+      if(!an.path){const lz0=rw.half-120,td=rw.half-220,stop=Math.max(-rw.half+120,td-950);
+        if(an.kind==='takeoff'){const h=holdPoint(rw,0);an.path=T.journey([{...h,y:0,v:2},{...at(rw,lz0+15),y:0,v:6},{...at(rw,lz0),y:0,v:4},{...at(rw,lz0-800),y:0,v:70},{...at(rw,lz0-1700),y:90,v:78},{...at(rw,lz0-6000),y:600,v:95}]);}
+        else if(an.kind==='landing'){const p=finalPoint(rw,an.left||0);an.path=T.journey([{...p,v:62},{...at(rw,rw.half+300),y:22,v:60},{...at(rw,td),y:0,v:56},{...at(rw,stop),y:0,v:10},{...at(rw,stop-20,30),y:0,v:8},{...at(rw,stop-40,75),y:0,v:8}]);}
+        else{const p=finalPoint(rw,an.left||0);an.path=T.journey([{...p,v:62},{...at(rw,rw.half+150),y:Math.max(30,p.y*.6),v:66},{...at(rw,rw.half-900),y:140,v:75},{...at(rw,-rw.half-2500),y:420,v:85}]);}}
+      const age=(now-an.t0)/1000;if(age>an.path.duration)continue;const q=T.poseAt(an.path,age);if(q)draw(an.aircraft,q,q.yaw,q.y,q.pitch);}
+  }
+
+  function scene(clock,look,state){
 
     if(!people.length)reset();const m=[];
 
-    if(look?.cabin)m.push(...cabin());else{m.push(...terminal());aircraft(m);wheelAssembly(m);for(const p of [...people,...workers])if(Math.hypot(p.x-look.x,p.z-look.z)<120)m.push(...human(p));}
+    if(look?.tower){m.push(...towerCab(state||active?.state));aircraft(m,clock,state);if(active?.role==='atc')atcTraffic(m);}
+    else if(look?.cabin)m.push(...cabin());else{m.push(...terminal());aircraft(m,clock,state);wheelAssembly(m);for(const p of [...people,...workers])if(Math.hypot(p.x-look.x,p.z-look.z)<120)m.push(...human(p));}
 
-    equipment(m,look);drawEffects(m,look);if(active?.hints){const g=guide(look),o=objects.find(o=>g.current?.targets.includes(o.id));if(o){const pulse=.10+Math.sin(time*4)*.025;orb(m,o.x-o.width/2,o.y+o.height/2+.08,o.z+o.depth/2,pulse,pulse,pulse,'#daf692');}}if(!look?.cabin){for(const p of workers)if(Math.hypot(p.x-look.x,p.z-look.z)<14)label(m,p.x,4.25,p.z,.9,p.name+' / CREW',undefined,undefined,.17);if(customer)label(m,customer.x,4.3,customer.z,1.8,customer.name,undefined,undefined,.22);}return m;
+    equipment(m,look);drawEffects(m,look);if(active?.hints){const g=guide(look),o=objects.find(o=>g.current?.targets.includes(o.id));if(o){const pulse=.10+Math.sin(time*4)*.025;orb(m,o.x-o.width/2,o.y+o.height/2+.08,o.z+o.depth/2,pulse,pulse,pulse,'#daf692');}}if(!look?.cabin&&!look?.tower){for(const p of workers)if(Math.hypot(p.x-look.x,p.z-look.z)<14)label(m,p.x,4.25,p.z,.9,p.name+' / CREW',undefined,undefined,.17);if(customer)label(m,customer.x,4.3,customer.z,1.8,customer.name,undefined,undefined,.22);}return m;
 
   }
 
   function pick(w,ray){
 
-    const origin=[w.x,4,w.z],pitch=Math.atan2(Math.sin(w.pitch||0)*20,30),dir=ray||[Math.sin(w.yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(w.yaw)*Math.cos(pitch)];let best=null,closest=7;
+    const origin=[w.x,w.eye??4,w.z],pitch=Math.atan2(Math.sin(w.pitch||0)*20,30),dir=ray||[Math.sin(w.yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(w.yaw)*Math.cos(pitch)];let best=null,closest=7;
 
     for(const o of objects){const center=[o.x,o.y,o.z],size=[o.width+.12,o.height+.14,o.depth+.12];let low=.1,high=closest;for(let i=0;i<3;i++){if(Math.abs(dir[i])<1e-7){if(Math.abs(origin[i]-center[i])>size[i]/2)high=-1;continue;}const a=(center[i]-size[i]/2-origin[i])/dir[i],b=(center[i]+size[i]/2-origin[i])/dir[i];low=Math.max(low,Math.min(a,b));high=Math.min(high,Math.max(a,b));}const along=low;if(low<=high&&along<closest){
 
-      if(!w.cabin){let blocked=false;for(let t=.2;t<along-.5;t+=.25){const x=origin[0]+dir[0]*t,y=origin[1]+dir[1]*t,z=origin[2]+dir[2]*t;if(A.layout.boxes.some(b=>b.solid&&y>b.y&&y<b.y+b.h&&Math.abs(x-b.x)<b.w/2&&Math.abs(z-b.z)<b.d/2)){blocked=true;break;}}if(blocked)continue;}
+      if(!w.cabin&&!w.tower){let blocked=false;for(let t=.2;t<along-.5;t+=.25){const x=origin[0]+dir[0]*t,y=origin[1]+dir[1]*t,z=origin[2]+dir[2]*t;if(A.layout.boxes.some(b=>b.solid&&y>b.y&&y<b.y+b.h&&Math.abs(x-b.x)<b.w/2&&Math.abs(z-b.z)<b.d/2)){blocked=true;break;}}if(blocked)continue;}
 
       best=o;closest=along;
 
@@ -567,6 +680,9 @@
 
   function move(w,keys,dt){
 
+    if(w.tower){w.yaw+=((keys.has('arrowright')?1:0)-(keys.has('arrowleft')?1:0))*dt*1.6;
+      const f=(keys.has('w')||keys.has('arrowup')?1:0)-(keys.has('s')||keys.has('arrowdown')?1:0),s=(keys.has('d')?1:0)-(keys.has('a')?1:0),n=Math.hypot(f,s)||1,v=(keys.has('shift')?4.5:3)*dt/n;
+      const nx=w.x+(Math.sin(w.yaw)*f+Math.cos(w.yaw)*s)*v,nz=w.z+(-Math.cos(w.yaw)*f+Math.sin(w.yaw)*s)*v;if(towerClear(nx,w.z))w.x=nx;if(towerClear(w.x,nz))w.z=nz;return;}
     const old={x:w.x,z:w.z};if(!w.cabin){A.step(w,keys,dt);if(!clear(w.x,w.z)){w.x=old.x;w.z=old.z;}return;}
 
     w.yaw+=((keys.has('arrowright')?1:0)-(keys.has('arrowleft')?1:0))*dt*1.6;
@@ -604,6 +720,22 @@
       add('Report cabin ready','Turn toward the rear galley and use the interphone.',['cabin-ready'],j.complete);
     }else if(r==='engineer'){
       add('Inspect the tyre','Read the specification stamped on the wheel.',['inspect'],h('inspect'));add('Raise the jack','Support the aircraft before removing its wheel.',['jack'],h('jack'));add('Select the replacement','Choose the wheel matching the specification.',j.options.map(o=>'spare'+o.id),h('spare'));add('Fit the wheel','Fit your selected replacement.',['fit'],h('replace'));const cross=J.nextCrossBolt(j),bolt=cross!==null?j.bolts[cross]:j.bolts.find(b=>!b.done);add('Torque the bolts','Cross pattern: after each bolt, torque the diagonally opposite one. Stop the needle in the green band.',bolt?['bolt'+bolt.id]:[],!j.bolts.some(b=>!b.done));add('Lower the jack','Lower the aircraft after every bolt is torqued.',['jack'],h('lower'));add('Sign the release','Run the final check.',['test'],j.complete);
+    }else if(r==='atc'){
+      // Step-by-step coaching: every tip names the exact strip or button to use next and says why.
+      const pend=J.pendingOf(j),best=J.bestRunway(j),bestName=J.runwayName(j,best),wind=j.wind,sel=J.selectedOf(j);
+      add('Go up to the tower','Clock in, then take the lift beside the ATC sign up to the control tower cab.',['tower'],!!w.tower);
+      const set=!!wind&&j.active===best;
+      add(j.active!==null&&!set?'Wind shift: change runway':'Set the runway into the wind',wind?`Look at the WIND dial: the wind blows from ${wind.from}°. Aircraft take off and land INTO the wind, and runway numbers are compass headings (36 = 360°, 18 = 180°, 27 = 270°). So click RWY ${bestName} on the right-hand board.`:'The wind appears once you reach the tower.',wind?['rwy'+best]:[],set);
+      if(set&&!j.complete){
+        const next=pend.find(q=>q.emergency)||pend.slice().sort((x,y)=>(J.finalLeft(x)??99)-(J.finalLeft(y)??99))[0];
+        if(!next)add('Wait for a radio call','Aircraft call you on the radio. When one does, its flight strip appears on the middle board.',[],false);
+        else if(sel!==next)add(next.emergency?'MAYDAY! Select it first':'Select the flight strip',`${next.emergency?'An emergency always goes first. ':''}Click the strip “${next.callsign}” on the middle board to talk to that aircraft.${next.kind==='landing'?' Its number is how many seconds it has left on final.':''}`,['strip'+next.id],false);
+        else if(J.occupied(j,best)&&next.kind==='landing')add('Runway busy: send it around',`RWY ${bestName} has a RED frame: ${j.occupancy[best].traffic} is on it. ${next.callsign} cannot land now, so press “Go around / hold”. It will fly a circuit and call again.`,['goAround'],false);
+        else if(J.occupied(j,best))add('Runway busy: keep it waiting',`RWY ${bestName} has a RED frame: ${j.occupancy[best].traffic} is on it. Leave ${next.callsign} holding short and clear it once the red frame disappears.`,['rwy'+best],false);
+        else if(next.kind==='takeoff')add('Clear it for takeoff',`${next.callsign} is a DEPARTURE and RWY ${bestName} is clear (green frame). Press “Cleared for takeoff”, then look out of the window to watch it go.`,['clearTakeoff'],false);
+        else add('Clear it to land',`${next.callsign} is an ARRIVAL and RWY ${bestName} is clear (green frame). Press “Cleared to land” before its countdown reaches zero.`,['clearLand'],false);
+      }
+      add('Handle all traffic',`${j.requests.filter(q=>q.done).length} of ${j.requests.length} aircraft handled. Tip: press B for binoculars.`,[],j.complete);
     }else if(r==='manager'){
       add('Review departures','Read the live operations board.',['board'],h('operations'));add('Support a department','Hire a colleague using a department control. Prices appear when you aim.',Object.keys(root.SkyCore.STAFF).map(k=>'hire'+k),h('hire'));add('Expand the terminal','Buy capacity when your budget allows. You can return later if funds are low.',['build'],h('build'));add('Handle an incident',j.incident?'Aim at the incident desk to read the situation, then choose. Some options are gambles.':'Watch the incident desk on the right. A situation will arrive shortly.',j.incident?['incident0','incident1']:['incident-title'],h('incident'));
     }else if(r==='pilot'){
@@ -612,7 +744,7 @@
     const current=j.complete?{title:'Shift complete',detail:'Your grade and pay are recorded. Start the next shift after the cooldown.',targets:['next']}:steps.find(s=>!s.done)||{title:'Desk ready',detail:'Continue managing your airport or leave the workstation.',targets:[]};
     return {steps,current,completed:steps.filter(s=>s.done).length};
   }
-  root.SkyWork={reset,tick,begin,end,release,ready,scene,pick,move,route,clear,guide,popup,burst,speech,patience,get active(){return active;},get customer(){return customer;},get people(){return people;},get workers(){return workers;},get objects(){return objects;}};
+  root.SkyWork={reset,tick,begin,end,release,ready,scene,pick,move,route,clear,guide,towerSpawn,popup,burst,speech,patience,get active(){return active;},get customer(){return customer;},get people(){return people;},get workers(){return workers;},get objects(){return objects;}};
 
 })(globalThis);
 

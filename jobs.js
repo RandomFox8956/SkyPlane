@@ -6,11 +6,25 @@
   let pausedAt=null,pausedTotal=0;
   const now=()=> (pausedAt??wall())-pausedTotal;
   function setPaused(value){if(value&&pausedAt===null)pausedAt=wall();else if(!value&&pausedAt!==null){pausedTotal+=wall()-pausedAt;pausedAt=null;}}
-  const names={checkin:'Passenger services',security:'Security screening',ground:'Aircraft turnaround',cabin:'Cabin preparation',engineer:'Aircraft maintenance'};
+  const names={checkin:'Passenger services',security:'Security screening',ground:'Aircraft turnaround',cabin:'Cabin preparation',engineer:'Aircraft maintenance',atc:'Air traffic control'};
   const NAMES=['Alex Rivers','Jamie Chen','Sam Taylor','Charlie Park','Robin Ford','Nadia Osei','Priya Nair','Owen Clarke','Maya Lindqvist','Theo Marchand','Isla Byrne','Kofi Mensah'];
   const SAFE_ITEMS=[['Paperback book','book'],['Water bottle · 90 ml','bottle'],['Folded clothing','clothes'],['Laptop','laptop'],['Umbrella','umbrella'],['Camera','camera'],['Sunglasses case','case']];
   const HAZARD_ITEMS=[['Kitchen scissors','scissors'],['Pocket knife','knife'],['Lighter fuel canister','fluid'],['Aerosol spray can','spray'],['Water bottle · 500 ml','bigbottle'],['Multi-tool','multitool'],['Box cutter','cutter']];
-  const PAR={checkin:24000,security:17000,ground:22000,cabin:22000,engineer:24000};
+  const PAR={checkin:24000,security:17000,ground:22000,cabin:22000,engineer:24000,atc:20000};
+  // Air traffic control: who is using each runway when a request arrives.
+  const TRAFFIC=['a Comet 320 rolling out','a Hauler 208 backtracking','a Kestrel 172 crossing','a Rescue Caravan vacating','a fuel bowser crossing','a runway inspection truck'];
+  // Runways as the tower sees them; the workplace fills in the island's real names and headings.
+  const DEFAULT_RUNWAYS=[{name:'36',deg:0},{name:'18',deg:180},{name:'27',deg:270}];
+  const runwaysOf=j=>j.runways&&j.runways.length?j.runways:DEFAULT_RUNWAYS;
+  const runwayName=(j,i)=>(runwaysOf(j)[i]||{}).name||'ABC'[i];
+  const headwind=(j,i)=>Math.cos((j.wind.from-runwaysOf(j)[i].deg)*Math.PI/180);
+  const bestRunway=j=>{if(!j.wind)return 0;let best=0;runwaysOf(j).forEach((_,i)=>{if(headwind(j,i)>headwind(j,best))best=i;});return best;};
+  function setWind(j,k){const rw=runwaysOf(j)[k]||runwaysOf(j)[0];j.wind={from:Math.round(((rw.deg+(Math.random()*50-25))%360+360)%360/10)*10||360,kt:8+Math.floor(Math.random()*15)};}
+  const occupied=(j,i)=>{const o=j.occupancy&&j.occupancy[i];return !!o&&now()<o.until;};
+  const pendingOf=j=>(j.requests||[]).filter(r=>r.arrived&&!r.done);
+  const selectedOf=j=>{const p=pendingOf(j);return p.find(r=>r.id===j.selected)||(p.length===1?p[0]:null);};
+  const finalLeft=r=>r.kind==='landing'&&r.deadline?Math.max(0,(r.deadline-now())/1000):null;
+  const requestLine=(j,r)=>r.emergency?`Mayday, mayday, mayday, tower, ${r.callsign}, engine failure, request immediate landing.`:r.kind==='takeoff'?`Tower, ${r.callsign}, holding short, ready for departure.`:`Tower, ${r.callsign}, on final, request landing.`;
   const MATERIAL={book:'organic',bottle:'organic',clothes:'organic',laptop:'metal',umbrella:'mixed',camera:'metal',case:'mixed',scissors:'metal',knife:'metal',fluid:'organic',spray:'mixed',bigbottle:'organic',multitool:'metal',cutter:'metal'};
   const COVERS=[['Toiletry bag','toiletry'],['Hairdryer','hairdryer'],['Shoe box','shoebox']];
   const GREETINGS=['Morning! Off to see my sister.','Hi! Is the flight on time?','Hello — first time flying!','Hey. Long week, going home.','Hiya! Window seat, if you have one?'];
@@ -53,6 +67,13 @@
       'Click each highlighted seat to fix it, and close every open overhead bin.',
       'Once everything is secure, click “Report cabin ready.” Anything still open when you report counts as a mistake.'
     ],note:'Which seats need attention is different every shift, and more of them need it as you gain experience.'},
+    atc:{title:'How to work air traffic control',steps:[
+      'WIND (left board): the dial shows where the wind blows from. Runway numbers are compass headings: 36 = north (360°), 18 = south (180°), 27 = west (270°). Click the runway on the right board whose number is closest to the wind, e.g. wind 350° → RWY 36.',
+      'FLIGHT STRIPS (middle board): each aircraft that calls you gets a strip. Click a strip to talk to that aircraft. ARRIVAL strips count down the seconds it has left on final.',
+      'RUNWAY FRAMES (right board): green = the runway in use is clear, red = another aircraft is on it.',
+      'BUTTONS (desk): departures get “Cleared for takeoff”, arrivals get “Cleared to land”. If the runway is red, press “Go around / hold” for an arrival, or just wait for a departure.',
+      'A red flashing MAYDAY strip always goes first. Follow the tutorial panel: it tells you the exact strip or button to use next, and “Show me where” points at it. Press B for binoculars.'
+    ],note:'Mistakes: clearing onto a red runway, using the wrong runway, ignoring a MAYDAY or letting an arrival run out of time. Your first shift is gentle: no blocked runways.'},
     engineer:{title:'How to work aircraft maintenance',steps:[
       'Click “Inspect tyre” to confirm the damage.',
       'Check the spec plate size, then pick the matching replacement wheel from the parts trolley — the other sizes are decoys.',
@@ -120,13 +141,20 @@
       const boltSpeed=Math.max(650,1250-sequence*35);
       return {...base,spec,options,tool:null,bolts:[0,1,2,3].map(i=>({id:i,gauge:null,done:false})),boltSpeed,lastBolt:null};
     }
+    if(role==='atc'){
+      // Aircraft call in one after another; arrivals burn their final-approach time while they wait.
+      const count=3+Math.min(3,Math.floor(sequence/2)),types=['jet','cargo','trainer'];
+      const requests=Array.from({length:count},(_,i)=>({id:i,callsign:'Sky Plane '+(300+Math.floor(Math.random()*600)),kind:Math.random()<.5?'takeoff':'landing',arriveAfter:i===0?4000:4000+i*Math.max(7000,15000-sequence*1000)+Math.random()*3000,final:Math.max(22000,45000-sequence*2500),aircraft:types[Math.floor(Math.random()*3)],emergency:false,done:false}));
+      if(sequence>=1&&count>2&&Math.random()<.5)Object.assign(requests[1+Math.floor(Math.random()*(count-1))],{emergency:true,kind:'landing',aircraft:'cargo',final:24000});
+      return {...base,requests,selected:null,active:null,wind:null,windPick:Math.floor(Math.random()*3),windShift:sequence>=2&&Math.random()<.55,occupancy:[null,null,null],blockRate:sequence===0?0:Math.min(.5,.15+sequence*.05),anims:[]};
+    }
     if(role==='manager')return {...base,incident:null,nextIncidentAt:now()+3000,handled:0,lastIncident:null,outcome:null};
     if(role==='pilot')return {...base,atc:null,readbackTries:0};
     return base;
   }
 
   // Neutral actions pick something up or start a gauge; they neither build nor break a streak.
-  const NEUTRAL=/^(pumpStart|boltStart:|armSignal|putDown|select:|drink:|inspectItem:|demoStart|clearance|seat:)/;
+  const NEUTRAL=/^(listen$|strip:|pumpStart|boltStart:|armSignal|putDown|select:|drink:|inspectItem:|demoStart|clearance|seat:)/;
   function act(j,action,dt=0){
     if(j.complete)return false;
     if(!Array.isArray(j.events))j.events=[];
@@ -141,6 +169,24 @@
   function tick(j){
     if(!j||j.complete)return;if(!Array.isArray(j.events))j.events=[];const t=now();
     if(j.role==='cabin'&&j.physical&&j.boardedAt&&j.calls)for(const c of j.calls)if(!c.ringing&&t>=j.boardedAt+c.after){c.ringing=true;c.rangAt=t;j.events.push({type:'bell',text:'CALL BELL · '+seatName(c.id),at:'seat'+c.id});}
+    if(j.role==='atc'){
+      // Traffic starts calling once the controller reaches the tower cab.
+      if(j.physical&&!j.towerAt)return;
+      if(!j.wind)setWind(j,j.windPick);
+      for(const r of j.requests){
+        if(!r.arrived&&t>=j.startedAt+r.arriveAfter){r.arrived=true;r.arrivedAt=t;if(r.kind==='landing')r.deadline=t+r.final;
+          j.events.push({type:'say',text:requestLine(j,r),at:'strip'+r.id});if(r.emergency)j.events.push({type:'alarm',text:'MAYDAY · '+r.callsign,at:'strip'+r.id});
+          // Other traffic sometimes blocks the runway in use just as someone calls you.
+          const k=j.active??bestRunway(j);if(!r.emergency&&!j.occupancy[k]&&Math.random()<j.blockRate){j.occupancy[k]={from:t,until:t+8000+Math.random()*7000,traffic:pickOne(TRAFFIC)};j.events.push({type:'alert',text:'RWY '+runwayName(j,k)+' OCCUPIED',at:'rwy'+k});}}
+        // An arrival that never hears a landing clearance has to go around by itself.
+        if(r.arrived&&!r.done&&r.kind==='landing'&&t>=r.deadline){j.mistakes=(j.mistakes||0)+1;j.streak=0;j.feedback=`${r.callsign} had to go around: no landing clearance in time.`;
+          j.anims.push({kind:'goaround',t0:t,request:r.id,runway:j.active??bestRunway(j),aircraft:r.aircraft,left:0});r.deadline=t+r.final;j.events.push({type:'bad',text:'GO AROUND',at:'strip'+r.id});}
+      }
+      for(let k=0;k<3;k++)if(j.occupancy[k]&&t>=j.occupancy[k].until)j.occupancy[k]=null;
+      // Halfway through some shifts the wind swings round and another runway has the headwind.
+      if(j.windShift&&!j.shifted&&j.requests.filter(r=>r.done).length>=Math.floor(j.requests.length/2)){j.shifted=true;const was=bestRunway(j);let k=was;for(let n=0;n<10&&k===was;n++){setWind(j,Math.floor(Math.random()*3));k=bestRunway(j);}
+        j.events.push({type:'alarm',text:'WIND SHIFT · '+j.wind.from+'°',at:'wind'},{type:'say',text:`All stations, wind now ${j.wind.from} degrees, ${j.wind.kt} knots.`});}
+    }
     if(j.role==='manager'&&!j.incident&&t>=j.nextIncidentAt){const pool=INCIDENTS.filter(i=>i.title!==j.lastIncident);j.incident=pickOne(pool);j.lastIncident=j.incident.title;j.events.push({type:'alert',text:'NEW INCIDENT',at:'incident-title'});}
   }
   function step(j,action,dt=0){
@@ -256,6 +302,31 @@
         if(pos>=42&&pos<=58){b.done=true;j.lastBolt=b.id;mark('bolt'+b.id);if(Math.abs(pos-50)<=3.2)perfect('PERFECT TORQUE','bolt'+b.id);}else need(false,pos<42?'Under-torqued — try again.':'Over-torqued — ease off next time.');
         b.gauge=null;
       }else if(action==='test'){if(need(j.bolts.every(b=>b.done)&&(!j.physical||has('lower')),'Torque all four bolts and lower the jack before the functional check.')){mark('test');j.testAt=now();j.complete=true;}}
+    }else if(j.role==='atc'){
+      const t=now(),pending=pendingOf(j),r=selectedOf(j),best=bestRunway(j),mayday=pending.find(x=>x.emergency);
+      if(action.startsWith('strip:')){const x=pending.find(x=>x.id===+action.slice(6));if(x){j.selected=x.id;j.feedback=`${x.callsign}: ${x.emergency?'MAYDAY, engine failure':x.kind==='takeoff'?'holding short, ready for departure':'on final, '+Math.ceil(finalLeft(x))+' s from the runway'}.`;}return false;}
+      if(action.startsWith('runway:')){const k=+action.slice(7);
+        if(!need(k===best,`The wind is from ${j.wind.from}° at ${j.wind.kt} kt. Aircraft take off and land into the wind: use runway ${runwayName(j,best)}.`))return false;
+        const changed=j.active!==k;j.active=k;mark('runway');if(changed)emit('say',`All stations, runway ${runwayName(j,k)} in use.`,'rwy'+k);return false;}
+      if(action==='listen'){const x=r||pending[0];if(x)emit('say',requestLine(j,x),'strip'+x.id);return false;}
+      if(!need(!!r,pending.length?'Select a flight strip first.':'No aircraft are calling you right now.'))return false;
+      const rw='runway '+runwayName(j,j.active??best);
+      if(action==='clearTakeoff'||action==='clearLand'){
+        if(!need(action===(r.kind==='takeoff'?'clearTakeoff':'clearLand'),r.kind==='takeoff'?`${r.callsign} wants to depart, not land.`:`${r.callsign} is on final approach: it needs a landing clearance.`))return false;
+        if(!need(j.active!==null,'Set the active runway into the wind first.'))return false;
+        if(!need(j.active===best,`The wind is now from ${j.wind.from}°. Change to runway ${runwayName(j,best)} before clearing anyone.`))return false;
+        if(!need(!mayday||mayday===r,`MAYDAY! ${mayday&&mayday.callsign} has priority. Clear the emergency first.`))return false;
+        if(occupied(j,j.active)){need(false,`${rw} is occupied by ${j.occupancy[j.active].traffic}! ${r.kind==='takeoff'?'Keep them holding short':'Send them around'}.`);emit('alarm','RUNWAY INCURSION','rwy'+j.active);return false;}
+        r.done=true;j.selected=null;j.anims.push({kind:r.kind,t0:t,request:r.id,runway:j.active,aircraft:r.aircraft,left:finalLeft(r)});
+        emit('say',`${r.callsign}, wind ${j.wind.from} at ${j.wind.kt}, ${rw}, ${r.kind==='takeoff'?'cleared for takeoff':'cleared to land'}.`,'strip'+r.id);
+        if(r.emergency)perfect('MAYDAY HANDLED','strip'+r.id);else if(t-r.arrivedAt<7000)perfect('SMOOTH CLEARANCE','strip'+r.id);
+        if(j.requests.every(x=>x.done)){mark('traffic');j.complete=true;}
+      }else if(action==='goAround'){
+        if(r.kind==='takeoff'){j.feedback=`${r.callsign} is holding short of ${rw}.`;emit('say',`${r.callsign}, hold short ${rw}.`,'strip'+r.id);return false;}
+        if(!need(occupied(j,j.active??best),`${rw} is clear. Clear ${r.callsign} to land instead of sending it around.`))return false;
+        j.anims.push({kind:'goaround',t0:t,request:r.id,runway:j.active??best,aircraft:r.aircraft,left:finalLeft(r)});r.deadline=t+r.final;j.selected=null;
+        emit('say',`${r.callsign}, go around, ${rw} is occupied. Fly the published missed approach.`,'strip'+r.id);
+      }
     }else if(j.role==='manager'){
       if(action.startsWith('incident:')){
         const inc=j.incident,o=inc&&inc.options[+action.split(':')[1]];if(!o)return false;
@@ -310,6 +381,9 @@
       {const pending=j.seats.filter(s=>(s.needsBelt||s.needsTray)&&!s.fixed).length+j.bins.filter(b=>b.open).length+(j.physical?j.requests.filter(r=>!r.served).length:0);
       subtitle=`Find every unsecured belt or tray (${pending} item${pending===1?'':'s'} left) and close the open bins before doors close.`;}
       body=`<div class="cabin-inspection"><div class="overhead-row">${j.bins.map(b=>`<button class="overhead-bin ${b.open?'':'secured'}" data-job-action="bin:${b.id}">${b.open?'Close bin '+(b.id+1):'Bin '+(b.id+1)+' closed'}</button>`).join('')}</div><div class="cabin-seats">${j.seats.map(s=>{const issue=s.needsBelt||s.needsTray;const label=issue&&!s.fixed?(s.needsBelt?'Fasten belt':'Stow tray'):'✓';return `<button class="cabin-seat ${s.fixed||!issue?'ok':'flag'}" data-job-action="fix:${s.id}"><span>${Math.floor(s.id/4)+1}${'ABCD'[s.id%4]}</span><i>${label}</i></button>`;}).join('')}</div>${button('release','Report cabin ready','primary')}</div>`;
+    }else if(j.role==='atc'){
+      subtitle='Work from the control tower: set the runway into the wind, then clear each aircraft when its runway is free.';
+      body=`<div class="scanner-work"><div class="scanner-header"><span>TOWER</span><span>${j.wind?'WIND '+j.wind.from+'° '+j.wind.kt+' KT':''}</span></div><p>Take the lift to the control tower to work this shift.</p></div>`;
     }else if(j.role==='engineer'){
       subtitle='Pick the correctly sized wheel, fit it, then torque all four bolts to spec.';
       body=`<div class="maintenance-bay"><div class="parts-trolley"><span class="job-kicker">SPEC PLATE · size ${j.spec}</span>${button('inspect','Inspect tyre')}<div class="wheel-options">${has('inspect')?j.options.map(o=>`<button class="job-control ${j.tool==='wheel'&&o.size===j.spec?'done':''}" data-job-action="pick:${o.id}">Wheel · size ${o.size}</button>`).join(''):'<p>Inspect first</p>'}</div></div>
@@ -319,5 +393,5 @@
     const score=scoreOf(j),grade=gradeLetter(score);
     return `<div class="job-simulation" data-role="${j.role}"><div class="job-simulation-heading"><div><span class="job-kicker">LIVE WORKSTATION / ${String(j.sequence+1).padStart(3,'0')}</span><h1>${names[j.role]}</h1><p>${subtitle}</p></div><div class="job-live">GRADE ${grade} · ${j.mistakes||0} mistake${j.mistakes===1?'':'s'}</div></div>${body}<div class="job-feedback ${j.complete?'success':''}" role="status">${j.complete?`✓ Job complete · grade ${grade} · Your airport has been updated.`:j.feedback||'Work the equipment carefully — speed and accuracy both pay.'}</div></div>`;
   }
-  const api={create,act,tick,view,names,scoreOf,gradeLetter,tutorials,time:now,setPaused,nextCrossBolt,seatName,DEMO,COVERS};root.SkyJobs=api;if(typeof module!=='undefined')module.exports=api;
+  const api={create,act,tick,view,names,scoreOf,gradeLetter,tutorials,time:now,setPaused,nextCrossBolt,seatName,DEMO,COVERS,occupied,runwayName,bestRunway,pendingOf,selectedOf,finalLeft,runwaysOf};root.SkyJobs=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
