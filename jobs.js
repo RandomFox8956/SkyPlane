@@ -32,7 +32,7 @@
     checkin:{title:'How to work check-in',steps:[
       'Scan the passport to reveal the travel document.',
       'Compare its name and flight code against the boarding ticket shown beside it — look closely for a different spelling or a different flight number.',
-      'Weigh every bag. Any bag over 20 kg needs an excess-baggage tag before it can be tagged.',
+      'Weigh every bag. Any bag over 20 kg needs an excess-baggage tag before it can be loaded.',
       'Load each bag once it’s weighed (and tagged, if it needed one).',
       'If the document matches the ticket and isn’t expired, Accept the passenger. If anything is wrong, Refer them to the service desk instead.'
     ],note:'A wrong accept/refer, a skipped step, or a wrongly-tagged bag all count as mistakes — they lower your grade and your pay.'},

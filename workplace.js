@@ -18,9 +18,12 @@
 
   const desks={checkin:[410,34],security:[386,-15],engineer:[374,158],ground:[319,214],pilot:[409,-91],manager:[409,-134]};
 
-  for(const [role,[x,z]] of Object.entries(desks))blocks.push({x,z,w:role==='ground'?5:4.2,d:1.5});
+  // Security has no front desk: the scanner belt is the counter, with a tray stand and console beside it.
+  for(const [role,[x,z]] of Object.entries(desks))if(role!=='security')blocks.push({x,z,w:role==='ground'?5:4.2,d:1.5});
 
-  blocks.push({x:384.6,z:-16.4,w:5.5,d:3.8},{x:406.3,z:33,w:2.6,d:4},{x:314,z:212,w:2.6,d:3.4},{x:322,z:211,w:2.6,d:3.4},{x:303,z:226,w:12,d:2.8});
+  const secTray={x:388.6,z:-15.7},secConsole={x:390.6,z:-15.5};
+
+  blocks.push({x:384.6,z:-16.4,w:5.5,d:3.8},{x:secTray.x,z:secTray.z,w:1.4,d:1.2},{x:secConsole.x,z:secConsole.z,w:1.7,d:.8},{x:406.3,z:33,w:2.6,d:4},{x:314,z:212,w:2.6,d:3.4},{x:322,z:211,w:2.6,d:3.4},{x:303,z:226,w:12,d:2.8});
 
   const clear=(x,z)=>A.canWalk(x,z)&&!blocks.some(b=>Math.abs(x-b.x)<b.w/2+.45&&Math.abs(z-b.z)<b.d/2+.45);
 
@@ -131,7 +134,8 @@
 
     if(['checkin','security'].includes(role)){
 
-      const dest={x:station.x,z:station.z-6,name:station.name};
+      // Check-in customers step right up to the counter so you can compare them with the passport photo.
+      const dest={x:station.x,z:station.z-(role==='checkin'?4.6:6),name:station.name};
 
       const available=people.filter(p=>p.lastService===undefined||time-p.lastService>60);const pool=available.length?available:people;
 
@@ -204,7 +208,8 @@
 
     else if(!seated&&!p.serving&&!p.checkedBag)suitcase(m,.58,.08,.35,palette[p.id%palette.length]);
 
-    return transformed(m,p.x,seated?2.35:2,p.z,-p.yaw,0,0,1);
+    // Positive yaw keeps the model's face (-z) pointing along its walking direction (sin yaw, -cos yaw).
+    return transformed(m,p.x,seated?2.35:2,p.z,p.yaw,0,0,1);
 
   }
 
@@ -212,11 +217,11 @@
 
     if(staticTerminal)return staticTerminal;const m=[],{box}=geom();
 
-    for(const [role,[x,z]] of Object.entries(desks)){box(m,x,2,z,role==='ground'?5:4.2,1.15,1.5,'#7a7164');box(m,x,3.15,z,4.5,.13,1.7,'#d4d7cd');box(m,x+1.3,3.3,z-.3,.1,.3,.1,'#344d56');box(m,x+1.3,3.55,z-.3,1.9,1.1,.09,'#18363f');label(m,x+1.3,4.43,z-.245,1.6,role.toUpperCase(),undefined,undefined,.17);box(m,x+1.3,3.3,z+.23,.85,.04,.27,'#344852');}
+    for(const [role,[x,z]] of Object.entries(desks)){if(role==='security')continue;box(m,x,2,z,role==='ground'?5:4.2,1.15,1.5,'#7a7164');box(m,x,3.15,z,4.5,.13,1.7,'#d4d7cd');box(m,x+1.3,3.3,z-.3,.1,.3,.1,'#344d56');box(m,x+1.3,3.55,z-.3,1.9,1.1,.09,'#18363f');label(m,x+1.3,4.43,z-.245,1.6,role.toUpperCase(),undefined,undefined,.17);box(m,x+1.3,3.3,z+.23,.85,.04,.27,'#344852');}
 
     box(m,409.1,3.28,34.2,1.15,.12,.55,'#243a42');box(m,409.1,3.4,34.2,.82,.025,.38,'#89bcc0');
 
-    box(m,411.35,3.28,34.5,1.15,.5,.8,'#d5d8c9');box(m,411.35,3.42,34.92,.9,.055,.03,'#253d42');
+    box(m,411.35,3.28,34.5,1.15,.5,.8,'#d5d8c9');box(m,411.35,3.7,34.92,.9,.055,.03,'#253d42');
 
     box(m,406.3,2,34,2.6,.32,2,'#a6bab5');box(m,406.3,2.32,34,2.5,.07,1.9,'#425a61');
 
@@ -232,7 +237,9 @@
 
     for(const x of [382,387.2])box(m,x,3,-18.1,.25,1.4,1,'#96aba5');box(m,384.6,4.4,-18.1,5.45,.25,1,'#96aba5');
 
-    box(m,389,3,-16,1.5,.1,1.3,'#d5b973');
+    // Restricted-items tray on its own stand, and the operator console with a standing control panel.
+    box(m,secTray.x,2,secTray.z,1.3,1.1,1.1,'#829992');box(m,secTray.x,3.1,secTray.z,1.2,.1,1.0,'#d5b973');label(m,secTray.x,3.2,secTray.z+.51,1.1,'RESTRICTED',undefined,undefined,.15);
+    box(m,secConsole.x,2,secConsole.z,1.6,1.2,.7,'#7a7164');box(m,secConsole.x,3.2,secConsole.z-.2,1.7,2.05,.08,'#18363f');label(m,secConsole.x,5.3,secConsole.z-.15,1.6,'SECURITY',undefined,undefined,.17);
 
     // Cabin boarding bridge and actual door to the walkable interior.
 
@@ -366,9 +373,9 @@
 
       add('passport',x-.9,3.56,z+.15,'PASSPORT / SCAN','scan','paper',has('scan')?`${j.name} | ${j.flightCode} | ${j.expired?'EXPIRED three months ago':'Valid until 2031'} | Compare the photo with the person at your desk`:'Read the passport on the document scanner.',.95);
 
-      add('ticket',x+.15,3.55,z+.18,'BOARDING TICKET','@ticket','paper',`${j.ticketName} | ${j.ticketFlight} | Gate A2 | Seat 4A`,.95);
+      add('ticket',x+.15,3.45,z+.18,'BOARDING TICKET','@ticket','paper',`${j.ticketName} | ${j.ticketFlight} | Gate A2 | Seat 4A`,.95);
 
-      if(has('scan')){label(m,x-.9,4.02,z+.15,1.7,j.name);label(m,x-.9,4.32,z+.15,1.7,j.flightCode+' / '+(j.expired?'EXPIRED':'VALID'));
+      if(has('scan')){label(m,x-.85,3.92,z+.15,1.0,j.name,undefined,undefined,.2);label(m,x-.85,4.14,z+.15,1.0,j.flightCode+' / '+(j.expired?'EXPIRED':'VALID'),undefined,undefined,.2);
         // Passport photo: shirt colour and skin tone must match the customer standing in front of you.
         if(j.photo){const {box}=geom(),px=x-1.55,pz=z+.2;box(m,px,3.4,pz,.38,.5,.03,'#e9e5d7');box(m,px,3.44,pz+.02,.3,.2,.02,j.photo.color);orb(m,px,3.72,pz+.035,.085,.1,.02,j.photo.skin);orb(m,px,3.8,pz+.04,.09,.05,.02,'#343334');label(m,px,3.93,pz+.02,.4,'PHOTO',undefined,undefined,.1);}}
 
@@ -381,29 +388,30 @@
         if(b.weighed&&b.weighedAt){const shown=Math.round(b.weight*Math.min(1,(J.time()-b.weighedAt)/700));label(m,x-2.7-b.id*.85,3.34,z+.42,.62,shown+' KG'+(shown===b.weight&&b.weight>20?(b.tagged?' ✓':' !'):''),undefined,undefined,.18);}const bx=x-2.7-b.id*.85;add('bag'+b.id,bx,2.85,z+.2,b.loaded?'Loaded':!b.weighed?'Weigh bag':b.weight>20&&!b.tagged?'Apply excess tag':'Load onto belt',b.loaded?'@read':!b.weighed?'weigh:'+b.id:b.weight>20&&!b.tagged?'tag:'+b.id:'load:'+b.id,'case',`Case ${b.id+1} · ${b.weighed?b.weight+' kg':'Place on scale'}${b.tagged?' · EXCESS TAG ATTACHED':''}`,.65);}
 
       add('window',x-.65,2.85,z+.85,'Window seat','seat:4A','button','Choose seat 4A by the window.',.9);add('aisle',x+.35,2.85,z+.85,'Aisle seat','seat:4B','button','Choose seat 4B by the aisle.',.9);
-      add('accept',x+1.35,3.55,z+.5,'Issue pass','accept','button','Confirm that the document and ticket match.',.9);add('refer',x+1.35,4.05,z,'Refer passenger','refer','button','Send an invalid document to the service desk.',1.5);
+      add('accept',x+1.35,3.55,z+.97,'Issue pass','accept','button','Confirm that the document and ticket match.',.9);add('refer',x+1.35,4.05,z,'Refer passenger','refer','button','Send an invalid document to the service desk.',1.5);
 
       if(has('decision')&&j.valid)add('printed',x+.1,3.75,z+.55,'Hand over pass','givePass','paper',`${j.name} | ${j.flightCode} | A2 | ${j.seat||'4A'} | BOARDING APPROVED`,1.3);
 
     }else if(role==='security'){
 
-      add('scanner',x+1.25,3.85,z,'Run X-ray','scan','button','Scan the waiting customer’s tray.',1.1);
+      const cz=secConsole.z-.08;add('scanner',secConsole.x,4.75,cz,'Run X-ray','scan','button','Scan the waiting customer’s tray.',1.5);
 
-      for(const it of j.items){const bx=x-2.4+(it.id%4)*1.2,bz=z-1-Math.floor(it.id/4)*1.1;if(has('scan')){
+      // Belongings come to rest on the belt in two rows in front of you: near-row labels sit on the belt edge, far-row labels float above.
+      for(const it of j.items){const row=Math.floor(it.id/4),bx=382.85+(it.id%4)*1.25,bz=row?-16.5:-15.2;if(has('scan')){
 
         add('item'+it.id,bx,3.32,bz,it.handled?'Secured':it.cleared?'Returned':`${it.id+1} · ${it.label}`,it.handled||it.cleared?'@read':'inspectItem:'+it.id,'evidence',it.handled?'Moved into inspection tray':`${it.label} · check item ${it.id+1} on the X-ray monitor above the scanner`,.85);
 
         // Items ride out of the scanner tunnel one by one after the X-ray runs.
         const slide=j.scannedAt?Math.max(0,Math.min(1,(J.time()-j.scannedAt-600-it.id*280)/650)):1;if(slide<=0&&!it.handled)continue;const ease=slide*slide*(3-2*slide);
-        const px=it.handled?389+(it.id%2)*.3:bx,pz=it.handled?-16+(it.id%3)*.25:-18.1+(bz+18.1)*ease,col={organic:'#c99a70',metal:'#8fb0bd',mixed:'#9cb88f'}[it.material]||'#81b8bd';
+        const px=it.handled?secTray.x-.3+(it.id%2)*.6:bx,pz=it.handled?secTray.z-.25+(it.id%3)*.25:-18.1+(bz+18.1)*ease,dy=it.handled?.1:0,col={organic:'#c99a70',metal:'#8fb0bd',mixed:'#9cb88f'}[it.material]||'#81b8bd';
 
-        if(/bottle|fluid|spray/.test(it.cls)){orb(m,px,3.3,pz,.16,.3,.16,col);geom().box(m,px,3.52,pz,.11,.10,.11,'#dfd7b9');}
+        if(/bottle|fluid|spray/.test(it.cls)){orb(m,px,3.3+dy,pz,.16,.3,.16,col);geom().box(m,px,3.52+dy,pz,.11,.10,.11,'#dfd7b9');}
 
-        else if(/knife|scissors|cutter|multitool/.test(it.cls)){limb(m,[px-.25,3.22,pz-.1],[px+.25,3.42,pz+.1],.09,'#b9c9c6');orb(m,px-.23,3.2,pz-.1,.14,.08,.12,'#4c6f7c');if(it.cls==='scissors')limb(m,[px-.25,3.4,pz],[px+.25,3.22,pz],.07,'#c7d3cf');}
+        else if(/knife|scissors|cutter|multitool/.test(it.cls)){limb(m,[px-.25,3.22+dy,pz-.1],[px+.25,3.42+dy,pz+.1],.09,'#b9c9c6');orb(m,px-.23,3.2+dy,pz-.1,.14,.08,.12,'#4c6f7c');if(it.cls==='scissors')limb(m,[px-.25,3.4+dy,pz],[px+.25,3.22+dy,pz],.07,'#c7d3cf');}
 
-        else{geom().box(m,px,3.14,pz,.65,it.cls==='laptop'?.05:.19,.44,col);if(it.cls==='book')geom().box(m,px+.02,3.18,pz,.59,.10,.41,'#e3dfc9');}
+        else{geom().box(m,px,3.14+dy,pz,.65,it.cls==='laptop'?.05:.19,.44,col);if(it.cls==='book')geom().box(m,px+.02,3.18+dy,pz,.59,.10,.41,'#e3dfc9');}
 
-        if(slide>=1||it.handled)label(m,bx,3.6,bz+.15,.96,it.handled?'INSPECTED':`${it.id+1} · ${it.label}`,undefined,undefined,.16);
+        if(slide>=1||it.handled)label(m,bx,row?3.72:3.1,row?bz:bz+.38,1.1,it.handled?'INSPECTED':`${it.id+1} · ${it.label}`,undefined,undefined,.16);
 
       }}
 
@@ -422,29 +430,29 @@
         // Alarm beacon: flashes red while a restricted item is still on the belt.
         const threat=has('scan')&&j.items.some(i=>i.hazard&&!i.handled);orb(m,381.7,4.95,-17.6,.14,.14,.14,!has('scan')?'#4e5a5c':threat?((time*2.5)%1<.5?'#ff3b2f':'#6a2a26'):'#7ee06b');}
 
-      add('confiscate',x+3,3.45,z+.5,'Restricted tray','confiscate','button','Place the selected restricted item here.',1.5);add('returnItem',x+3,4.05,z+.5,'Return safe item','returnItem','button','Give the selected permitted item back.',1.5);
-      add('clear',x+1.3,4.5,z,'Release bag','release','button','Only release after removing restricted items.',1.4);
+      add('confiscate',secTray.x,3.62,secTray.z+.62,'Restricted tray','confiscate','button','Place the selected restricted item here.',1.2);add('returnItem',secConsole.x,4.3,cz,'Return safe item','returnItem','button','Give the selected permitted item back.',1.5);
+      add('clear',secConsole.x,3.85,cz,'Release bag','release','button','Only release after removing restricted items.',1.5);
 
     }else if(role==='ground'){
 
       // A placed bag is swung up through the hold door in an arc.
       for(const b of j.bags)if(b.zone&&b.loadedAt&&!j.releasedAt){const k=(J.time()-b.loadedAt)/850;if(k<1){const hx=b.zone==='fragile'?304.5:301.5,bag=[];suitcase(bag,0,-.41,0,'#90735c',b.fragile?'FRAGILE':'SP / HOLD');m.push(...geom().transformed(bag,hx,3.3+k*.4+Math.sin(k*Math.PI)*.9,229.6-k*2,0,k*2.4,0,1-k*.55));}}
 
-      for(const b of j.bags)if(!b.zone&&j.selected!==b.id)add('bag'+b.id,x-1.9+b.id*.8,3,z+.3,'Case '+(b.id+1)+(b.fragile?' FRAGILE':''),'select:'+b.id,'case',`${b.weight} kg · ${j.selected===b.id?'Carrying':'Pick up this bag'}`);
+      for(const b of j.bags)if(!b.zone&&j.selected!==b.id)add('bag'+b.id,x-1.9+b.id*.8,3.78,z+.3,'Case '+(b.id+1)+(b.fragile?' FRAGILE':''),'select:'+b.id,'case',`${b.weight} kg · ${j.selected===b.id?'Carrying':'Pick up this bag'}`);
 
       if(!j.releasedAt)add('standard',301.5,3.8,227.8,'Standard hold','zoneStandard','button','Place the carried bag in the aircraft hold.',1.6);if(!j.releasedAt)add('fragile',304.5,3.8,227.8,'Fragile hold','zoneFragile','button','Place fragile luggage in the padded compartment.',1.6);
 
-      if(j.selected!==null){const carry=[];suitcase(carry,.65,-.5,-1.15,'#90735c',j.bags[j.selected]?.fragile?'FRAGILE':'SP / HOLD');m.push(...geom().transformed(carry,look.x,3.3,look.z,-look.yaw));}
+      if(j.selected!==null){const carry=[];suitcase(carry,.65,-.5,-1.15,'#90735c',j.bags[j.selected]?.fragile?'FRAGILE':'SP / HOLD');m.push(...geom().transformed(carry,look.x,3.3,look.z,look.yaw));}
 
       add('chocks',309.8,2.8,229,'Remove chocks',has('chocks')?'@read':'chocks','button','Remove wheel chocks before requesting pushback.',1.5);if(!has('chocks'))geom().box(m,309,2.05,228.3,.6,.35,.6,'#dfad4c');
-      if(j.selected!==null)add('putDown',x,4.3,z+.3,'Put bag back','putDown','button','Return the carried bag to the cart.',1.6);
+      if(j.selected!==null)add('putDown',x,4.6,z+.3,'Put bag back','putDown','button','Return the carried bag to the cart.',1.6);
       add('fuel',314,3.9,213,'Fuel '+(has('fuel')?'complete':j.fuelGauge?'STOP':'START'),has('fuel')?'@read':j.fuelGauge?'pumpStop':'pumpStart','button',`Stop in the ${j.fuelTarget.join('–')}% target band.`,1.6);gauge(m,314,4.4,213,j.fuelGauge,...j.fuelTarget);
 
       const signal=j.signalAt,now=J.time(),lit=signal&&now>=signal.ready&&now<=signal.ready+j.signalWindowMs;
 
       add('tug',322,3.9,212,has('tug')?'Tug connected':!signal?'Arm clearance':lit?'CONNECT NOW':now>signal.ready+j.signalWindowMs?'Rearm clearance':'Await clearance',has('tug')?'@read':signal&&now<=signal.ready+j.signalWindowMs?'tug':'armSignal','button','Load bags and finish refuelling before pushback.',1.7);
 
-      orb(m,322,4.5,212,.15,.15,.15,lit?'#b7ef72':'#bc744d');add('release',x,4.75,z,'Signal departure ready','release','button','',2.1);
+      orb(m,322,4.5,212,.15,.15,.15,lit?'#b7ef72':'#bc744d');add('release',x,5.05,z,'Signal departure ready','release','button','',2.1);
 
     }else if(role==='engineer'){
 
@@ -457,12 +465,13 @@
 
       for(const b of j.bolts){const bx=369.55+(b.id%2)*2.9,by=2.5+Math.floor(b.id/2)*.6;add('bolt'+b.id,bx,by,159,b.done?'Torqued':b.gauge?'TORQUE NOW':'Start bolt '+(b.id+1),b.done?'@read':b.gauge?'boltStop:'+b.id:'boltStart:'+b.id,'button','Stop the wrench in the green band.',.9);if(b.gauge)gauge(m,371,4.95,159,b.gauge,42,58);}
 
-      add('test',x+1.8,4.5,z+.6,'Check and sign release','test','button','Inspect, replace, then torque all four wheel bolts.',2.2);
+      add('test',x+2.1,4.5,z+.6,'Check and sign release','test','button','Inspect, replace, then torque all four wheel bolts.',2.2);
 
     }else if(role==='pilot'){
-      if(j.selectedFlight){add('weather',407.7,4.8,z+.4,'Check weather','@weather','button','Review weather and difficulty.',1.7);add('fuelcheck',409.7,4.8,z+.4,'Aircraft / fuel','@fuelcheck','button','Review the aircraft and fuel plan.',1.8);add('dispatch',408.7,5.45,z+.4,'Board selected flight','@dispatch','button','Complete preflight, then board at gate A1.',2.4);}
+      if(j.selectedFlight){add('weather',407.7,5.0,z+.4,'Check weather','@weather','button','Review weather and difficulty.',1.7);add('fuelcheck',409.7,5.0,z+.4,'Aircraft / fuel','@fuelcheck','button','Review the aircraft and fuel plan.',1.8);add('dispatch',408.7,5.5,z+.4,'Board selected flight','@dispatch','button','Complete preflight, then board at gate A1.',2.4);}
 
-      let i=0;for(const [key,mission] of Object.entries(root.SkyCore.MISSIONS)){if(active.missions?!active.missions.includes(key):key==='return'||key==='training')continue;add('flight'+key,x-1+(i%2)*2,3.6+Math.floor(i/2)*.55,z+.2,mission.title,'@flight:'+key,'button',mission.aircraft,1.8);i++;}
+      let i=0;for(const [key,mission] of Object.entries(root.SkyCore.MISSIONS)){if(active.missions?!active.missions.includes(key):key==='return'||key==='training')continue;// Three columns keep up to nine flights below the preflight buttons.
+        add('flight'+key,x-1.4+(i%3)*1.4,3.6+Math.floor(i/3)*.45,z+.2,mission.title,'@flight:'+key,'button',mission.aircraft,1.3);i++;}
 
       // Weather radar: the sweep reveals cells that match the airport's live weather.
       {const {box}=geom(),rx=405.3,ry=4.35,wx=active.state?.settings.weather||'clear';box(m,rx,3.2,z-.12,2.1,2.4,.06,'#1b2f37');orb(m,rx,ry,z-.05,.8,.8,.02,'#0c2a22');for(const r of [.4,.78])for(let k=0;k<24;k++){const a=k/24*Math.PI*2;box(m,rx+Math.cos(a)*r,ry+Math.sin(a)*r,z-.03,.02,.02,.01,'#2f6b52');}
@@ -498,7 +507,8 @@
 
     }
 
-    if(j?.complete)add('next',x+2,3.6,z+.75,'Call next','@next','button','Your graded pay has been added to the airport. Call the next customer or start the next task.',1);
+    // Each desk has its own free spot for "Call next" so it never overlaps other controls.
+    if(j?.complete){const [nx,ny,nz]=({checkin:[x+1.3,4.5,z+.08],security:[secConsole.x,3.4,secConsole.z-.08],ground:[x+1.9,4.6,z+.3],engineer:[x+2.4,3.6,z+.75]})[role]||[x+2,3.6,z+.75];add('next',nx,ny,nz,'Call next','@next','button','Your graded pay has been added to the airport. Call the next customer or start the next task.',role==='security'?1.5:1.1);}
 
   }
 
@@ -537,7 +547,7 @@
 
     if(look?.cabin)m.push(...cabin());else{m.push(...terminal());aircraft(m);wheelAssembly(m);for(const p of [...people,...workers])if(Math.hypot(p.x-look.x,p.z-look.z)<120)m.push(...human(p));}
 
-    equipment(m,look);drawEffects(m,look);if(active?.hints){const g=guide(look),o=objects.find(o=>g.current?.targets.includes(o.id));if(o){const pulse=.10+Math.sin(time*4)*.025;orb(m,o.x,o.y+.45,o.z,pulse,pulse,pulse,'#daf692');}}if(!look?.cabin){for(const p of workers)if(Math.hypot(p.x-look.x,p.z-look.z)<14)label(m,p.x,4.25,p.z,.9,p.name+' / CREW',undefined,undefined,.17);if(customer)label(m,customer.x,4.3,customer.z,1.8,customer.name,undefined,undefined,.22);}return m;
+    equipment(m,look);drawEffects(m,look);if(active?.hints){const g=guide(look),o=objects.find(o=>g.current?.targets.includes(o.id));if(o){const pulse=.10+Math.sin(time*4)*.025;orb(m,o.x-o.width/2,o.y+o.height/2+.08,o.z+o.depth/2,pulse,pulse,pulse,'#daf692');}}if(!look?.cabin){for(const p of workers)if(Math.hypot(p.x-look.x,p.z-look.z)<14)label(m,p.x,4.25,p.z,.9,p.name+' / CREW',undefined,undefined,.17);if(customer)label(m,customer.x,4.3,customer.z,1.8,customer.name,undefined,undefined,.22);}return m;
 
   }
 
