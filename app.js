@@ -223,7 +223,7 @@
     if(!job||job.role!==state.role||job.complete)job=SkyJobs.create(state.role,state.taskSequence);
     SkyWork.begin(state.role,job);SkyWork.active.state=state;SkyWork.active.missions=availableMissions().map(([key])=>key);updateWorldWork();
   }
-  function taxiAction(){if(!flight||isPaused())return;if(flight.taxiAssist){flight.taxiAssist=false;flight.speed=flight.airSpeed=flight.vx=flight.vz=0;toast('Taxi assist stopped.');}else if(C.startTaxi(flight)){keys.clear();toast('Taxi assist engaged. B cancels.');}else toast('Slow below 19 knots on the ground. On arrival, land on the assigned runway after all checkpoints.');}
+  function taxiAction(){if(!flight||isPaused())return;if(flight.taxiAssist){flight.taxiAssist=false;flight.throttle=0;toast('Taxi assist off. Hold B to brake.');}else if(C.startTaxi(flight)){keys.clear();toast('Taxi assist engaged. B cancels.');}else toast('Slow below 19 knots on the ground. On arrival, land on the assigned runway after all checkpoints.');}
   function render(){
     document.body.classList.toggle('immersive-work',!inMenu&&!flight&&(page==='airport'||page==='job'));
     overviewRenderer=null;walkRenderer=null;$('page-label').textContent=(pageNames[page]||page).toUpperCase();

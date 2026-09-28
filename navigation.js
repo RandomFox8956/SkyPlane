@@ -62,11 +62,109 @@
     return {gates,path,radius:chosen.radius,feasible:path[0].y<=40.1&&path.at(-1).y<=14.1,score:chosen.score};
   }
   function stand(isle){return {x:isle.x+300,z:isle.z+240,y:2,name:'A1',yaw:-Math.PI/2};}
-  function taxi(C,isle,rw){
-    const parked=stand(isle),entry=C.runwayToWorld(isle,rw,0,rw.half+85),lineup=C.runwayToWorld(isle,rw,0,rw.half-120);
-    const south=Math.max(680,...C.runwaysFor(isle).map(r=>r.cz+Math.abs(r.cos)*r.half+Math.abs(r.sin)*r.width/2+180));
-    return [parked,{x:isle.x+260,z:parked.z},{x:isle.x+260,z:isle.z+south},{x:entry.x,z:isle.z+south},entry,lineup];
+  // Each runway has its own taxiway: a lane of its own leaving the apron, and a full-length parallel
+  // taxiway on the side facing the terminal, joined to the runway at both ends. The north–south runways
+  // leave the apron westward on separate lanes (z 310 and 150); the east–west runway leaves on a third
+  // lane and runs up or down a spur at x 40, just west of the buildings.
+  const VERTICAL_LANES=[310,150],SPUR_X=40;
+  function taxiway(C,isle,rw){
+    const off=rw.width/2+56,at=(lx,lz)=>C.runwayToWorld(isle,rw,lx,lz);
+    // The parallel sits on whichever side of the runway faces the apron.
+    const c=at(0,0),apron={x:isle.x+260,z:isle.z+240},side=(rw.cos*(apron.x-c.x)+rw.sin*(apron.z-c.z))>=0?1:-1;
+    const par=lz=>at(side*off,lz),rwy=lz=>at(0,lz);
+    const horizontal=Math.abs(rw.sin)>.7,verticals=C.runwaysFor(isle).filter(r=>Math.abs(r.sin)<=.7);
+    const laneZ=horizontal?(rw.cz<0?-60:380):VERTICAL_LANES[Math.max(0,verticals.findIndex(r=>r.index===rw.index))%VERTICAL_LANES.length];
+    const lane=[{x:apron.x,z:isle.z+laneZ}];
+    if(horizontal){const p=par(0);lane.push({x:isle.x+SPUR_X,z:isle.z+laneZ},{x:isle.x+SPUR_X,z:p.z});}
+    else lane.push({x:par(0).x,z:isle.z+laneZ});
+    // Where a hillside crowds the far end of the runway, the far exit moves in until its taxiway is on flat ground.
+    let far=-rw.half+30;const ground=p=>C.terrainHeight([isle],p.x,p.z);
+    const blocked=lz=>{
+      for(const d of [-60,-30,0,30,60]){   // generous: a peak's mesh reaches a little past its height model
+        if(ground(at(side*(off+d),lz))>1.5)return true;                                   // the parallel taxiway
+        for(let k=0;k<4;k++)if(ground(at(side*off*k/4,lz+d))>1.5)return true;             // the connector to the runway
+      }
+      return false;
+    };
+    while(far<0&&blocked(far))far+=20;
+    return {apron,lane,side,far,
+      hold:par(rw.half-30),entry:rwy(rw.half-30),lineup:rwy(rw.half-120),     // departure end
+      farHold:par(far),exit:rwy(far)};                                        // far end, for vacating after landing
   }
-  const api={curves,route,stand,taxi};root.SkyNavigation=api;
+  // Stand → own lane → parallel taxiway → departure end → lined up on the runway.
+  function taxi(C,isle,rw){
+    const t=taxiway(C,isle,rw);
+    return [stand(isle),t.apron,...t.lane,t.hold,t.entry,t.lineup];
+  }
+  // After the landing rollout: vacate at the far end, back down the parallel and the runway's lane to the stand.
+  function taxiIn(C,isle,rw){
+    const t=taxiway(C,isle,rw);
+    return [t.exit,t.farHold,...t.lane.slice().reverse(),t.apron,stand(isle)];
+  }
+  // Every stretch of taxiway pavement to draw for one runway (polylines).
+  function taxiPavement(C,isle,rw){
+    const t=taxiway(C,isle,rw);
+    return [[stand(isle),t.apron,...t.lane],[t.lane.at(-1),t.hold],[t.farHold,t.hold],[t.hold,t.entry],[t.farHold,t.exit]];
+  }
+  // The island's whole taxi network as a graph: every taxiway stretch, split wherever two of them meet or
+  // cross, plus each runway's centreline (for vacating after landing and backtracking). Runway travel costs
+  // more than taxiway travel, and each runway's lined-up position can only be reached from its threshold
+  // end, so the aircraft always arrives there pointing down the runway. Cached on the island.
+  function network(C,isle){
+    if(isle._taxiNet)return isle._taxiNet;
+    const nodes=[],edges=[],lineups={};
+    const node=p=>{for(const n of nodes)if(Math.hypot(n.x-p.x,n.z-p.z)<1.5)return n;const n={x:p.x,z:p.z,out:[]};nodes.push(n);return n;};
+    const link=(a,b,runway=false)=>{if(a===b)return;const cost=Math.hypot(b.x-a.x,b.z-a.z)*(runway?2.5:1);a.out.push({to:b,cost});b.out.push({to:a,cost});edges.push({a,b,runway});};
+    const rws=C.runwaysFor(isle),segs=[];
+    for(const rw of rws)for(const line of taxiPavement(C,isle,rw))for(let i=1;i<line.length;i++)segs.push({a:line[i-1],b:line[i],cuts:[0,1]});
+    // Cut each stretch wherever another one crosses it, joins it, or runs along it.
+    const along=(s,p)=>{const dx=s.b.x-s.a.x,dz=s.b.z-s.a.z,L2=dx*dx+dz*dz||1,t=((p.x-s.a.x)*dx+(p.z-s.a.z)*dz)/L2;
+      if(t>0&&t<1&&Math.hypot(s.a.x+dx*t-p.x,s.a.z+dz*t-p.z)<1.5)s.cuts.push(t);};
+    for(let i=0;i<segs.length;i++)for(let j=i+1;j<segs.length;j++){
+      const s=segs[i],t=segs[j],rx=s.b.x-s.a.x,rz=s.b.z-s.a.z,sx=t.b.x-t.a.x,sz=t.b.z-t.a.z,den=rx*sz-rz*sx;
+      if(Math.abs(den)<1e-6){along(s,t.a);along(s,t.b);along(t,s.a);along(t,s.b);continue;}
+      const qx=t.a.x-s.a.x,qz=t.a.z-s.a.z,u=(qx*sz-qz*sx)/den,v=(qx*rz-qz*rx)/den,eu=1.5/Math.hypot(rx,rz),ev=1.5/Math.hypot(sx,sz);
+      if(u<-eu||u>1+eu||v<-ev||v>1+ev)continue;
+      s.cuts.push(Math.max(0,Math.min(1,u)));t.cuts.push(Math.max(0,Math.min(1,v)));
+    }
+    for(const s of segs){
+      let prev=node(s.a);
+      for(const c of [...new Set(s.cuts)].sort((a,b)=>a-b)){const n=node({x:s.a.x+(s.b.x-s.a.x)*c,z:s.a.z+(s.b.z-s.a.z)*c});link(prev,n);prev=n;}
+    }
+    for(const rw of rws){
+      const t=taxiway(C,isle,rw),exit=node(t.exit),mid=node(t.lineup),entry=node(t.entry);
+      link(exit,mid,true);link(mid,entry,true);
+      // Lined up for takeoff: a separate one-way end point, entered only from the threshold side.
+      const final={x:t.lineup.x,z:t.lineup.z,out:[]};entry.out.push({to:final,cost:Math.hypot(final.x-entry.x,final.z-entry.z)});lineups[rw.index]=final;
+    }
+    return isle._taxiNet={nodes,edges,lineups,stand:node(stand(isle))};
+  }
+  // A taxi route from wherever the aircraft is now (`from` = {x,z,yaw}) to `goal`: 'stand', or a runway to
+  // line up on. It joins the network at the nearest point of the nearest taxiway or runway, preferring to
+  // keep rolling the way the aircraft already points rather than turning round.
+  function plan(C,isle,from,goal){
+    const net=network(C,isle),target=goal==='stand'?net.stand:net.lineups[goal.index];if(!target)return null;
+    const hx=Math.sin(from.yaw),hz=-Math.cos(from.yaw);
+    if(goal!=='stand'){
+      // Already on the centreline near the lined-up spot and pointing down the runway: just roll on to it.
+      const dx=target.x-from.x,dz=target.z-from.z,side=Math.abs(dx*goal.cos+dz*goal.sin);
+      if(Math.hypot(dx,dz)<40&&side<8&&Math.cos(from.yaw-goal.rad)>.94)return [{x:from.x,z:from.z},{x:target.x,z:target.z}];
+    }
+    let best=null;
+    for(const e of net.edges){const dx=e.b.x-e.a.x,dz=e.b.z-e.a.z,L2=dx*dx+dz*dz||1,t=Math.max(0,Math.min(1,((from.x-e.a.x)*dx+(from.z-e.a.z)*dz)/L2)),x=e.a.x+dx*t,z=e.a.z+dz*t,d=Math.hypot(from.x-x,from.z-z);if(!best||d<best.d)best={e,x,z,d};}
+    if(!best)return null;
+    const start={x:best.x,z:best.z,out:[]};
+    for(const end of [best.e.a,best.e.b]){const dx=end.x-start.x,dz=end.z-start.z,L=Math.hypot(dx,dz),behind=L>1&&(dx*hx+dz*hz)/L<-.3;start.out.push({to:end,cost:L*(best.e.runway?2.5:1)+(behind?250:0)});}
+    const dist=new Map([[start,0]]),prev=new Map(),open=new Set([start]);
+    while(open.size){
+      let n=null;for(const o of open)if(!n||dist.get(o)<dist.get(n))n=o;open.delete(n);if(n===target)break;
+      for(const {to,cost} of n.out){const d=dist.get(n)+cost;if(d<(dist.get(to)??Infinity)){dist.set(to,d);prev.set(to,n);open.add(to);}}
+    }
+    if(!prev.has(target))return null;
+    const points=[];for(let n=target;n;n=prev.get(n))points.unshift({x:n.x,z:n.z});
+    if(best.d>2)points.unshift({x:from.x,z:from.z});else points[0]={x:from.x,z:from.z};
+    return points.filter((p,i)=>!i||Math.hypot(p.x-points[i-1].x,p.z-points[i-1].z)>.5);
+  }
+  const api={curves,route,stand,taxiway,taxi,taxiIn,taxiPavement,network,plan};root.SkyNavigation=api;
   if(typeof module!=='undefined')module.exports=api;
 })(globalThis);
