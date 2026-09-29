@@ -94,8 +94,7 @@ There are **20 maps** in four world types, five per type. Every map has its own 
 | − / Ctrl | Decrease throttle |
 | F | Cycle flaps: 0°, 15°, 30° |
 | G | Landing gear |
-| B | Wheel brakes / cancel taxi assist |
-| T | Taxi assistance between gate and runway |
+| B | Wheel brakes |
 | C | Change camera |
 | Esc / P | Pause |
 
@@ -120,7 +119,7 @@ Airport building placement is predefined; upgrades grow a procedural island. Cus
 
 Airport and flight update:
 - In business mode, choose **Enter airport**. WASD moves, arrow keys turn, dragging looks around, Shift walks faster, and E works at your selected role's station. The floor plan marks that station. Check-in, security, cabin, engineering and ground jobs retain their rewards and cooldowns; the manager hires staff and expands the terminal using desk controls, and the pilot dispatches flights from the physical operations board.
-- Every flight starts at parking gate A1. T enables taxi assistance, which stops at the runway for manual takeoff. B cancels assistance. After the checkpoints, land on the assigned arrival runway, brake below 19 knots, and press T to taxi to A1 and complete the flight. You can also taxi manually and park at A1 with idle throttle and B.
+- Every flight starts at parking gate A1. Taxiing is fully manual (there is no taxi assistance): low throttle, Q/E to steer, B to brake. Ground speed off the runway is limited to 35 knots. After the checkpoints, land on the assigned arrival runway, taxi to A1, and park there with idle throttle and B to complete the flight.
 - Gate totals now include departure and final checkpoints. The separate pale navigation trail follows broad turns and a straight final approach. Same-island circuits use a different arrival runway. Terrain clearance takes priority when assigning runways.
 - Previous race records are reset once because the route and gate-to-gate timing have changed.
 - `navigation.js` contains route and taxi geometry; `airport.js` contains the shared terminal model and pedestrian collision plan. Both are required for offline play.
@@ -159,3 +158,15 @@ Every job reacts in the 3D world: synthesised sound effects, floating score pop-
 - **Engineer** — the jack visibly lifts the strut, the damaged tyre rolls away and the new wheel slides in. Bolts must be torqued in a real cross pattern (after each bolt, the diagonally opposite one), nuts spin under the wrench, and the release check spin-tests the wheel.
 - **Manager** — a live departures board, plus an incident desk where situations arrive (storms, jammed belts, influencers, fuel price spikes, lost children, birds on the runway). Every choice trades cash against reputation, and some are gambles.
 - **Pilot** — a weather radar sweeps storm cells that match the airport's weather. ATC reads out your clearance; memorise the squawk code and read it back. It is only shown for a few seconds, and **Say again** repeats it. A clean first readback earns a small bonus.
+
+## Low-poly update
+
+- Everything is drawn flat-shaded: the WebGL renderer lights each polygon as one facet, so every model reads as low poly.
+- The scenery is built from very few faces: four-sided pines and broadleaf crowns, half-resolution coastlines, hexagonal checkpoint rings, sparser runway lights, a triangulated sea, and chunky four-sided 3D clouds instead of flat sky ellipses.
+- `build_airport.py` now builds the terminal, hangars, tower, fuel farm, aircraft and passengers low-poly: no bevels, square struts and hexagonal drums, hexagonal fuselages, five-panel roofs, no fine surface detail, and flat facets. Run it in Blender (it also works with `blender --background --factory-startup --python build_airport.py`) to regenerate `airport-assets.js`. The cockpit script is unchanged.
+- Aircraft fittings (windows, windshield, livery stripe, door handles, struts, wingtip lights, winglets, engine pods and pylons) are placed on the actual low-poly hull and wing surfaces, so nothing floats. The landing gear hangs from the keel and animates: G swings the main legs up under the fuselage and the nose leg back over about 2 seconds (the HUD shows RAISING / LOWERING). Touching down before the gear is fully down counts as a gear-up landing.
+- There is no taxi assistance: you always taxi yourself. Yellow arrows painted on the ground and turn-by-turn hints ("Turn left (Q) in 120 m · 800 m to go") follow a live route that re-plans if you take a wrong turn, and the minimap shows it too. The route ends at a stop bar on your runway or at gate A1.
+- Nosewheel steering turns tightly at walking pace and gently at speed; the brakes hold the aircraft once stopped. The HUD shows ground speed and a `TAXI x / 35 KT` readout on the ground.
+- The 35-knot limit applies everywhere on the ground except your assigned departure runway (and the runway you land on, for the rollout). Crossing or using any other runway is still taxiing, so it can no longer trigger a "takeoff roll continued outside the runway" failure.
+- Each runway has one red `RWY xx` sign beside it, about 200 m in from the end where you line up, placed clear of other runways, taxi routes and wingtips. The old signs out on the taxiways and apron are gone.
+- Crossing or turning on your own departure runway is taxiing too: the 35-knot limit only lifts, and a takeoff roll only starts, once you point down the runway.

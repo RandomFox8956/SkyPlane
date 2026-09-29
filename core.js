@@ -406,47 +406,40 @@
     destRw=destRw||(dest?runwaysFor(dest)[0]:rws[(homeRw.index+1)%rws.length]);
     return Navigation.route(api,type,course,layout,homeRw,destRw).gates;
   }
-  // Taxi assist plans a route from wherever the aircraft is right now, and keeps whatever speed it
-  // already has, so engaging it mid-taxi carries straight on instead of jumping back to the stand.
-  function startTaxi(f){
-    if(!f.onGround||f.speed>10||f.crashed||f.completed)return false;
-    const from={x:f.x,z:f.z,yaw:f.yaw};let path=null,phase;
-    if(!f.airborne){const isle=f.islands[f.departureIsland||0];path=Navigation.plan(api,isle,from,runwaysFor(isle)[f.homeRunway]);phase='taxi-out';}
-    else if(f.landed&&f.gate>=f.gates.length){path=Navigation.plan(api,f.islands[f.finish],from,'stand');phase='taxi-in';}
-    if(!path||path.length<2)return false;
-    f.taxiPath=path;f.taxiIndex=1;f.phase=phase;f.taxiAssist=true;f.throttle=0;return true;
+  // Ground movement is manual and limited to taxi speed (35 knots) everywhere except the runway you are
+  // cleared to take off from, or the runway you have just landed on.
+  const TAXI_LIMIT=35/1.944;
+  // Taxi guidance (never automatic control): the route from where the aircraft is now to where it has to go
+  // next, re-planned twice a second so wrong turns are corrected, plus a plain-language next instruction.
+  function taxiGoal(f){
+    if(!f.onGround||f.crashed||f.completed||f.type==='free')return null;
+    if(!f.airborne){
+      if(f.takeoffRoll)return null;
+      const isle=f.islands[f.departureIsland||0],rw=runwaysFor(isle)[f.homeRunway];
+      // Anywhere on the departure runway, pointing down it, counts as lined up: no more route to follow.
+      if(f.phase==='takeoff'&&Math.cos(f.yaw-rw.rad)>.9976)return null;
+      return {isle,goal:rw,kind:'runway'};
+    }
+    if(f.landed&&f.gate>=f.gates.length)return {isle:f.islands[f.finish],goal:'stand',kind:'stand'};
+    return null;
   }
-  // Ground handling for taxi assist: taxi speed on straights, slower through corners, a smooth stop at the
-  // end, and a nose-wheel turning circle, so the aircraft rolls round bends instead of pivoting on the spot.
-  const TAXI={speed:10,crawl:2,accel:1.3,brake:1.8};
-  // Turning circle tightens at walking pace (nose-wheel steering plus differential braking).
-  const taxiRadius=v=>4+v*.9;
-  function taxiGuide(f,dt){
-    const path=f.taxiPath,last=path.length-1,seg=i=>{const a=path[i-1],b=path[i],dx=b.x-a.x,dz=b.z-a.z,L=Math.hypot(dx,dz)||1;return {a,b,dx:dx/L,dz:dz/L,L};};
-    // Move on to the next leg once this one's end is reached or passed.
-    while(f.taxiIndex<last){const s=seg(f.taxiIndex),t=(f.x-s.a.x)*s.dx+(f.z-s.a.z)*s.dz;if(t<s.L-4&&Math.hypot(s.b.x-f.x,s.b.z-f.z)>4)break;f.taxiIndex++;}
-    const i=f.taxiIndex,s=seg(i),along=Math.max(0,Math.min(s.L,(f.x-s.a.x)*s.dx+(f.z-s.a.z)*s.dz)),toEnd=s.L-along;
-    // Steer for a point a little way down the route (further ahead at higher speed).
-    let look=8+f.speed*1.2,k=i,px=s.a.x+s.dx*along,pz=s.a.z+s.dz*along,room=toEnd;
-    while(look>room&&k<last){look-=room;k++;const n=seg(k);px=n.a.x;pz=n.a.z;room=n.L;}
-    const n=seg(k),reach=Math.min(look,room);px+=n.dx*reach;pz+=n.dz*reach;
-    if(i===last){px=s.b.x;pz=s.b.z;}
-    const heading=Math.atan2(px-f.x,-(pz-f.z)),error=Math.atan2(Math.sin(heading-f.yaw),Math.cos(heading-f.yaw));
-    // Speed: brake for the end of the route and for the next corner (tighter corner, slower), crawl while swinging round.
-    let remaining=toEnd;for(let j=i+1;j<=last;j++)remaining+=seg(j).L;
-    let target=Math.min(TAXI.speed,Math.sqrt(2*TAXI.brake*.8*remaining));
-    if(i<last){const next=seg(i+1),turn=Math.acos(Math.max(-1,Math.min(1,s.dx*next.dx+s.dz*next.dz))),corner=turn<.25?TAXI.speed:Math.max(TAXI.crawl,TAXI.speed-(TAXI.speed-4)*Math.min(1,turn/1.57)-(turn>1.8?1:0));
-      target=Math.min(target,Math.sqrt(corner*corner+2*TAXI.brake*toEnd));}
-    if(Math.abs(error)>1)target=Math.min(target,TAXI.crawl);
-    f.speed+=clamp(target-f.speed,-TAXI.brake*dt,TAXI.accel*dt);f.speed=Math.max(0,f.speed);
-    const rate=Math.min(.55,Math.max(f.speed,.6)/taxiRadius(f.speed));
-    f.yaw+=clamp(error*1.8,-rate,rate)*dt;
-    f.vx=Math.sin(f.yaw)*f.speed;f.vz=-Math.cos(f.yaw)*f.speed;f.x+=f.vx*dt;f.z+=f.vz*dt;
-    f.airSpeed=f.speed;f.vy=f.verticalSpeed=0;f.y=2;f.pitch=f.roll=0;
-    // Taxi power for the engine sound and propeller: a little more to get rolling, idle while braking.
-    f.throttle=clamp(.1+(target-f.speed)*.12+f.speed*.008,.06,.3);
-    const end=path[last],gone=i===last&&(f.x-s.a.x)*s.dx+(f.z-s.a.z)*s.dz>=s.L;
-    return (i===last&&Math.hypot(end.x-f.x,end.z-f.z)<1.5&&f.speed<1)||gone;
+  function updateTaxiRoute(f,dt){
+    f.taxiClock=(f.taxiClock||0)-dt;if(f.taxiClock>0)return;f.taxiClock=.5;
+    const g=taxiGoal(f);if(!g){f.taxiPath=null;f.taxiInfo=null;return;}
+    const path=Navigation.plan(api,g.isle,{x:f.x,z:f.z,yaw:f.yaw},g.goal);
+    if(!path||path.length<2){f.taxiPath=null;f.taxiInfo=null;return;}
+    f.taxiPath=path;
+    // Distance left, and the next real turn along the route (ignoring gentle bends).
+    let remaining=0,turnIn=null,turn=null,travelled=0;
+    for(let i=1;i<path.length;i++){
+      const a=path[i-1],b=path[i],L=Math.hypot(b.x-a.x,b.z-a.z);remaining+=L;
+      if(turn===null&&i<path.length-1){
+        travelled+=L;const c=path[i+1],h0=Math.atan2(b.x-a.x,-(b.z-a.z)),h1=Math.atan2(c.x-b.x,-(c.z-b.z)),d=Math.atan2(Math.sin(h1-h0),Math.cos(h1-h0));
+        if(Math.abs(d)>.35&&travelled>6){turn=d>0?'right':'left';turnIn=travelled;}
+      }
+    }
+    const aim=path[Math.min(1,path.length-1)],bearing=Math.atan2(aim.x-f.x,-(aim.z-f.z)),off=Math.atan2(Math.sin(bearing-f.yaw),Math.cos(bearing-f.yaw));
+    f.taxiInfo={kind:g.kind,remaining,turn,turnIn,off,sharp:turn&&turnIn<70};
   }
   function newFlight(type, s, destination=null) {
     const islands=flightLayout(s,type,destination),free=type==='free';
@@ -468,8 +461,8 @@
     const finishIdx=destRw.index;
     const spawn=Navigation.stand(home),arrivalStand=Navigation.stand(dest||home);
 
-    return { type,map:home.map.id,islands,destination:free?null:destination,finish:destination?1:0,x:spawn.x,y:2,z:spawn.z, vx:0,vy:0,vz:0, yaw:spawn.yaw,pitch:0,roll:0,phase:'parked',arrivalStand,taxiAssist:false,navPath:route.path,navIndex:0,
-      throttle:0,flaps:0,gear:true,fuel:100,health:100,cargo:100,speed:0,airSpeed:0,verticalSpeed:0,
+    return { type,map:home.map.id,islands,destination:free?null:destination,finish:destination?1:0,x:spawn.x,y:2,z:spawn.z, vx:0,vy:0,vz:0, yaw:spawn.yaw,pitch:0,roll:0,phase:'parked',arrivalStand,navPath:route.path,navIndex:0,
+      throttle:0,flaps:0,gear:true,gearPos:1,fuel:100,health:100,cargo:100,speed:0,airSpeed:0,verticalSpeed:0,
       gates:route.gates,gate:0,gateTimes:[],time:0,airborne:false,onGround:true,stall:false,
       engineFailure:false,landed:false,crashed:false,completed:false,gateRadius:difficulty(s).gate,
       maxAltitude:0, hardLanding:0, runwayHalf:homeRw.half, homeRunway:homeIdx, finishRunway:finishIdx,
@@ -492,16 +485,10 @@
   }
   function stepFlight(f, controls, dt, settings) {
     if (f.crashed || f.completed) return [];
-    const events=[]; f.time+=dt;const tuning=flightDifficulty(settings);
+    const events=[]; f.time+=dt;
+    // The landing gear takes about 2.2 seconds to swing up or down (0 = stowed, 1 = down and locked).
+    f.gearPos=clamp((f.gearPos??(f.gear?1:0))+(f.gear?1:-1)*dt/2.2,0,1);const tuning=flightDifficulty(settings);
     const p0={x:f.x,y:f.y,z:f.z,yaw:f.yaw,pitch:f.pitch,roll:f.roll};
-    if(f.taxiAssist){
-      // Any pilot input hands control back with the aircraft still rolling; ground physics takes over from here.
-      if(controls.brake||controls.throttle||controls.rudder||controls.roll){f.taxiAssist=false;f.throttle=0;return events;}
-      const arrived=taxiGuide(f,dt);
-      if(root.SkyWorld?.sceneryCollision(f,p0)){f.taxiAssist=false;f.crashed=true;events.push({type:'crash',reason:'Taxi path obstructed. Keep clear of scenery.'});return events;}
-      if(arrived){f.throttle=0;f.vx=f.vz=0;f.taxiAssist=false;f.speed=f.airSpeed=0;if(f.phase==='taxi-out'){f.phase='takeoff';f.yaw=runwaysFor(f.islands[f.departureIsland||0])[f.homeRunway].rad;}else if(f.type==='free'){f.phase='parked';f.airborne=f.landed=false;f.departureIsland=f.finish;f.homeRunway=f.finishRunway;f.runwayName=f.finishRunwayName;}else{f.phase='arrived';f.completed=true;events.push({type:'complete'});}}
-      return events;
-    }
     const windStrength=(settings.weather==='storm'?12:settings.weather==='overcast'?4:0)*tuning.wind;
     const windX=windStrength*(.6+Math.sin(f.time*.17)*.4);
     const windZ=windStrength*Math.cos(f.time*.13)*.3;
@@ -514,7 +501,15 @@
     f.pitch=clamp(f.pitch+pitchRate*dt,-.5,.48);
     f.roll=clamp(f.roll+((controls.roll||0)*.65*authority-f.roll*tuning.stability)*dt,-1.05,1.05);
     if (f.onGround) f.roll*=Math.exp(-5*dt);
-    const turn=f.onGround?(controls.rudder||controls.roll||0)*clamp(speed/40,0,.7)*tuning.steering:Math.tan(f.roll)*9.81/Math.max(speed,22)+(controls.rudder||0)*.13;
+    let turn;
+    if(f.onGround){
+      // Nosewheel steering: up to ~55 degrees of wheel angle at walking pace, narrowing to a few degrees at
+      // takeoff speed. The tiller eases in and out instead of snapping, and yaw follows the wheel geometry.
+      const input=clamp(controls.rudder||controls.roll||0,-1,1),rate=input?3:4.5;
+      f.steer=(f.steer||0)+clamp(input-(f.steer||0),-rate*dt,rate*dt);
+      const rolling=Math.hypot(f.vx,f.vz),maxWheel=clamp(.95-Math.max(0,rolling-5)*.04,.1,.95);
+      turn=clamp(rolling*Math.tan(f.steer*maxWheel)/4.4,-.75,.75)*(.55+tuning.steering*.45);
+    }else turn=Math.tan(f.roll)*9.81/Math.max(speed,22)+(controls.rudder||0)*.13;
     f.yaw+=turn*dt;
     if(tuning.autoRotate&&f.onGround&&runwayAt(f).island>=0&&speed>32&&!pitchInput)f.pitch+=clamp(.14-f.pitch,-.15*dt,.15*dt);
     const pathAngle=Math.atan2(f.vy,Math.max(speed,8));
@@ -523,14 +518,21 @@
     const cl=clamp(.35+4.1*aoa+f.flaps*.24,-.8,1.7)*(f.stall?tuning.stallLift:1);
     const density=1.225*Math.exp(-f.y/9000),mass=1250,area=16.2;
     const lift=.5*density*speed*speed*area*cl;
-    const drag=.5*density*speed*speed*area*(.033+.049*cl*cl+(f.gear?.016:0)+f.flaps*.018);
+    const drag=.5*density*speed*speed*area*(.033+.049*cl*cl+f.gearPos*.016+f.flaps*.018);
     const thrust=f.fuel>0?f.throttle*(f.engineFailure?2450:4200)*Math.max(.45,1-speed/150):0;
     const accel=(thrust*Math.cos(f.pitch)-drag)/mass-(f.onGround?.6:0);
-    let groundSpeed=Math.max(0,Math.hypot(f.vx,f.vz)+accel*dt-(controls.brake&&f.onGround?7*dt:0));
+    let groundSpeed=Math.max(0,Math.hypot(f.vx,f.vz)+accel*dt-(controls.brake&&f.onGround?8*dt:0));if(controls.brake&&f.onGround&&groundSpeed<.35)groundSpeed=0;
     // Gate and taxiway acceleration is a taxi operation, not a runway excursion.
     const groundRunway=runwayAt(f,tuning.runwayMargin);
-    if(f.onGround&&!f.airborne&&groundRunway.island>=0&&groundSpeed>18)f.takeoffRoll=true;
-    if(f.onGround&&!f.airborne&&!f.takeoffRoll&&groundRunway.island<0){groundSpeed=Math.min(groundSpeed,10);if(groundSpeed>.1)f.phase='taxi-out';}
+    // Crossing or taxiing along any other runway is still taxiing: only the departure runway (before takeoff)
+    // or any runway after landing (the rollout) allows more than taxi speed.
+    const onDeparture=groundRunway.island>=0&&(f.type==='free'||groundRunway.island===(f.departureIsland||0)&&groundRunway.runway===f.homeRunway);
+    // Crossing the departure runway, or turning on it, is still taxiing: the limit only lifts (and a takeoff roll
+    // only begins) once the aircraft points down the runway, within about 15 degrees of its heading.
+    const rwyHeading=onDeparture?runwaysFor(f.islands[groundRunway.island])[groundRunway.runway].rad:0,lined=onDeparture&&(f.type==='free'?Math.abs(Math.cos(f.yaw-rwyHeading)):Math.cos(f.yaw-rwyHeading))>.965;
+    const fastAllowed=f.airborne?groundRunway.island>=0:lined||f.takeoffRoll;
+    if(f.onGround&&!f.airborne&&lined&&groundSpeed>TAXI_LIMIT+.5)f.takeoffRoll=true;
+    if(f.onGround&&!f.takeoffRoll&&!fastAllowed){groundSpeed=Math.min(groundSpeed,TAXI_LIMIT);if(!f.airborne&&groundSpeed>.1&&!onDeparture)f.phase='taxi-out';}
     const forwardX=Math.sin(f.yaw),forwardZ=-Math.cos(f.yaw);
     // Sideslip decays gradually in the air; the wheels track the runway on the ground.
     const desiredX=forwardX*groundSpeed+(f.onGround?0:windX*.16),desiredZ=forwardZ*groundSpeed+(f.onGround?0:windZ*.16);
@@ -552,16 +554,16 @@
       const hard=Math.abs(f.vy);
       if(f.airborne&&!f.onGround){
         f.hardLanding=hard;
-        if(!runway||!f.gear||hard>tuning.sink||Math.abs(f.roll)>tuning.landingRoll||f.speed>tuning.landingSpeed){f.crashed=true;events.push({type:'crash',phase:'landing',reason:!runway?'You touched down away from the runway.':!f.gear?'The landing gear was still retracted.':hard>tuning.sink?'The descent was too fast at touchdown.':Math.abs(f.roll)>tuning.landingRoll?'The wings were not level at touchdown.':'The approach speed was too high.'});}
-        else {if(f.type==='free'){f.finish=at.island;f.finishRunway=at.runway;f.finishRunwayName=runwaysFor(f.islands[at.island])[at.runway].name;f.arrivalStand=Navigation.stand(f.islands[at.island]);}f.landed=at.island===f.finish&&at.runway===f.finishRunway;f.phase='landing';f.health-=Math.max(0,hard-2)*12;f.cargo-=Math.max(0,hard-1.5)*10;events.push({type:'touchdown',island:at.island,runway:at.runway});}
+        if(!runway||!f.gear||f.gearPos<.98||hard>tuning.sink||Math.abs(f.roll)>tuning.landingRoll||f.speed>tuning.landingSpeed){f.crashed=true;events.push({type:'crash',phase:'landing',reason:!runway?'You touched down away from the runway.':!f.gear?'The landing gear was still retracted.':f.gearPos<.98?'The landing gear was still extending. Lower it earlier on the approach.':hard>tuning.sink?'The descent was too fast at touchdown.':Math.abs(f.roll)>tuning.landingRoll?'The wings were not level at touchdown.':'The approach speed was too high.'});}
+        else {if(f.type==='free'){f.finish=at.island;f.finishRunway=at.runway;f.finishRunwayName=runwaysFor(f.islands[at.island])[at.runway].name;f.arrivalStand=Navigation.stand(f.islands[at.island]);}f.landed=at.island===f.finish&&at.runway===f.finishRunway;f.phase='landing';f.takeoffRoll=false;f.health-=Math.max(0,hard-2)*12;f.cargo-=Math.max(0,hard-1.5)*10;events.push({type:'touchdown',island:at.island,runway:at.runway});}
       }
       // Free flight: any runway is a fuel stop — touch down, roll, and take off again.
       if(f.type==='free'&&runway&&f.fuel<99.5){f.fuel=100;f.refuelled=true;events.push({type:'refuel',island:at.island,runway:at.runway});}
       f.y=2;f.vy=Math.max(0,f.vy);f.onGround=true;f.pitch=Math.max(0,f.pitch);
       if(!f.airborne&&at.island===(f.departureIsland||0)&&at.runway===f.homeRunway)f.phase='takeoff';
-      f.offRunwayTime=f.takeoffRoll&&!runway&&f.speed>20?(f.offRunwayTime||0)+dt:0;
+      f.offRunwayTime=f.takeoffRoll&&!onDeparture&&f.speed>TAXI_LIMIT+2?(f.offRunwayTime||0)+dt:0;
       if(f.offRunwayTime>tuning.excursionGrace){f.crashed=true;events.push({type:'crash',phase:'takeoff',reason:'The takeoff roll continued outside the runway.'});}
-      if(!runway&&f.speed<12)f.takeoffRoll=false;
+      if(!onDeparture&&f.speed<12)f.takeoffRoll=false;
     }
     // Sweep against the same static meshes used to draw every island, before rewards/gates.
     if(!f.crashed&&root.SkyWorld?.sceneryCollision(f,p0)){
@@ -578,6 +580,7 @@
       f.lastGateDistance=Math.hypot(f.x-gate.x,f.y-gate.y,f.z-gate.z);
       if(distance<f.gateRadius){f.navIndex=Math.max(f.navIndex||0,gate.pathIndex||0);f.gate++;f.gateTimes.push(f.time);events.push({type:'gate'});if(f.type==='emergency'&&f.gate===(f.destination?2:Math.floor(f.gates.length/2))){f.engineFailure=true;events.push({type:'engine'});}}
     }
+    if(f.onGround)updateTaxiRoute(f,dt);else if(f.taxiPath){f.taxiPath=null;f.taxiInfo=null;}
     if(f.type!=='free'&&f.gate>=f.gates.length&&f.onGround&&f.airborne&&f.speed<5&&!f.crashed){if(f.landed&&Math.hypot(f.x-f.arrivalStand.x,f.z-f.arrivalStand.z)<9&&f.throttle<.05&&controls.brake){f.phase='arrived';f.completed=true;events.push({type:'complete'});}}
     if(f.y>2000) {f.pitch=Math.min(f.pitch,-.05);events.push({type:'ceiling'});}
     // Scenery is solid: mountains, hills, and mesas end the flight on contact.
@@ -597,6 +600,6 @@
     if(f.type==='race'&&(!s.bestRace||f.time<s.bestRace)){s.bestRace=f.time;f.newRecord=true;if(Array.isArray(trace))s.raceRecord=sanitizeRecord({time:f.time,trace,gateTimes:f.gateTimes})||s.raceRecord;}
     return s.world?.business===false?0:amount;
   }
-  const api={STAFF,BUILDINGS,MISSIONS,ROLES,DESTINATIONS,MODES,SOLO_MODES,TERRAINS,MAPS,EQUIPPED,GHOST_RATE,clamp,worldName,worldMode,worldTerrain,worldMap,currentMap,mapsFor,mountainsFor,terrainHeight,homeLayout,freeLayout,flightLayout,pickDestination,runwayAt,runwaysFor,runwayToWorld,runwayFor,startTaxi,freshState,sanitize,sanitizeRecord,sampleGhost,ghostAt,entry,spend,price,build,hire,wageRate,FLIGHT_DIFFICULTY,flightDifficulty,difficulty,tickEconomy,completeTask,makeRoute,newFlight,stepFlight,rewardFlight};
+  const api={STAFF,BUILDINGS,MISSIONS,ROLES,DESTINATIONS,MODES,SOLO_MODES,TERRAINS,MAPS,EQUIPPED,GHOST_RATE,clamp,worldName,worldMode,worldTerrain,worldMap,currentMap,mapsFor,mountainsFor,terrainHeight,homeLayout,freeLayout,flightLayout,pickDestination,runwayAt,runwaysFor,runwayToWorld,runwayFor,TAXI_LIMIT,freshState,sanitize,sanitizeRecord,sampleGhost,ghostAt,entry,spend,price,build,hire,wageRate,FLIGHT_DIFFICULTY,flightDifficulty,difficulty,tickEconomy,completeTask,makeRoute,newFlight,stepFlight,rewardFlight};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.SkyCore=api;
 })(typeof globalThis!=='undefined'?globalThis:this);

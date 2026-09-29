@@ -29,11 +29,17 @@
     arctic:{sea:['#a6cbc6','#a9cfca'],shore:'#e4ebe8',land:['#eef1ea','#e6ece6','#f2f4ee','#e9eee8'],hill:'#c9d3d1',ridge:'#d7dedc',peak:'#e3e8e6',snow:'#ffffff',sky:['#c2d3dc','#e9eef0','#b8c9cc'],map:['#5c7d76','#d8e0dc'],trees:110,plant:'snowpine'}
   };
   function tree(mesh,x,z,scale=1,plant='pine'){
-    if(plant==='palm'){box(mesh,x,1,z,3*scale,44*scale,3*scale,'#9a8a60',1);for(let i=0;i<5;i++){const a=i/5*TAU;face(mesh,[[x,45*scale,z],[x+Math.cos(a+.35)*22*scale,40*scale,z+Math.sin(a+.35)*22*scale],[x+Math.cos(a)*30*scale,30*scale,z+Math.sin(a)*30*scale],[x+Math.cos(a-.35)*22*scale,40*scale,z+Math.sin(a-.35)*22*scale]],i%2?'#5f9455':'#6fa35f',1);}return;}
+    if(plant==='palm'){box(mesh,x,1,z,3*scale,44*scale,3*scale,'#9a8a60',1);for(let i=0;i<4;i++){const a=i/4*TAU;face(mesh,[[x,45*scale,z],[x+Math.cos(a+.35)*22*scale,40*scale,z+Math.sin(a+.35)*22*scale],[x+Math.cos(a)*30*scale,30*scale,z+Math.sin(a)*30*scale],[x+Math.cos(a-.35)*22*scale,40*scale,z+Math.sin(a-.35)*22*scale]],i%2?'#5f9455':'#6fa35f',1);}return;}
     if(plant==='cactus'){box(mesh,x,1,z,5*scale,34*scale,5*scale,'#5f8a52',1);box(mesh,x-6*scale,12*scale,z,4*scale,16*scale,4*scale,'#6a9459',1);box(mesh,x+6*scale,8*scale,z,4*scale,20*scale,4*scale,'#6a9459',1);return;}
     box(mesh,x,1,z,4*scale,20*scale,4*scale,'#8c8562',1);
-    if(plant==='snowpine'){pyramid(mesh,x,13*scale,z,16*scale,40*scale,'#4f6e63',5,1);pyramid(mesh,x,30*scale,z,12*scale,30*scale,'#e9efeb',5,1);return;}
-    pyramid(mesh,x,13*scale,z,16*scale,40*scale,'#497b59',5,1);pyramid(mesh,x,30*scale,z,12*scale,30*scale,'#64865b',5,1);
+    if(plant==='snowpine'){pyramid(mesh,x,13*scale,z,16*scale,40*scale,'#4f6e63',4,1);pyramid(mesh,x,30*scale,z,12*scale,30*scale,'#e9efeb',4,1);return;}
+    if(plant==='pine'&&Math.abs(Math.sin(x*12.9898+z*78.233)*43758.5453)%1<.35){
+      // Low-poly broadleaf: a faceted double-cone crown on the trunk.
+      const r=17*scale,cy=30*scale,top=[x,cy+r*1.1,z],bottom=[x,cy-r*.8,z],ring=[];for(let i=0;i<4;i++){const a=i/4*TAU+x;ring.push([x+Math.cos(a)*r,cy,z+Math.sin(a)*r]);}
+      for(let i=0;i<4;i++){const p0=ring[i],p1=ring[(i+1)%4];face(mesh,[p0,p1,top],shade('#64865b',.85+i%3*.1),1);face(mesh,[p1,p0,bottom],shade('#497b59',.85+i%2*.1),1);}
+      return;
+    }
+    pyramid(mesh,x,13*scale,z,16*scale,40*scale,'#497b59',4,1);pyramid(mesh,x,30*scale,z,12*scale,30*scale,'#64865b',4,1);
   }
   // One runway strip built at the origin heading north (pavement, centreline, edge lines, edge lights
   // and threshold bars). `ws` scales the width so the angled runways can be a little narrower than the
@@ -46,7 +52,7 @@
       box(m,side*27*ws,2.6,0,1,.1,half*2-25,'#cfd6ba');
       // Edge lights are flat markers (kept at ground height) so that where runways cross, one runway's
       // lights can never become an obstacle on another runway's landing rollout.
-      for(let z=-half+55;z<half;z+=90)box(m,side*36*ws,2.7,z,3,.1,3,'#ffe3a1',1);
+      for(let z=-half+55;z<half;z+=180)box(m,side*36*ws,2.7,z,3,.1,3,'#ffe3a1',1);
       for(let i=0;i<4;i++){box(m,side*(7+i*5)*ws,2.7,half-65,2,.1,45,'#f1efdb');box(m,side*(7+i*5)*ws,2.7,-half+65,2,.1,45,'#f1efdb');}
     }
     return m;
@@ -137,6 +143,21 @@
     box(m,0,2.15,-1.9,.95,.15,.4,frame,1);
     return m;
   }
+  // Landing-gear animation: each gear part swings about its leg's hinge on the keel. Main legs fold sideways
+  // in under the fuselage, the nose leg folds back; fully stowed gear is not drawn. `pos` 1 = down, 0 = up.
+  function foldGear(mesh,pos){
+    if(pos>=1)return mesh;
+    const out=[],angle=(1-pos)*Math.PI/2,c=Math.cos(angle),s=Math.sin(angle);
+    for(const f of mesh){
+      if(!f.gear){out.push(f);continue;}
+      if(pos<.03||!f.pivot)continue;
+      const [px,py,pz]=f.pivot,k=f.fold==='nose'?0:(px>=0?1:-1);
+      out.push({...f,v:f.v.map(([x,y,z])=>{const dx=x-px,dy=y-py,dz=z-pz;
+        if(!k)return [x,py+dy*c+dz*s,pz-dy*s+dz*c];                 // nose leg: wheel swings aft and up
+        return [px+dx*c+k*dy*s,py-k*dx*s+dy*c,z];})});             // main legs: wheels swing inward and up
+    }
+    return out;
+  }
   function transformed(mesh,x,y,z,yaw=0,pitch=0,roll=0,scale=1){
     const sy=Math.sin(yaw),cy=Math.cos(yaw),sp=Math.sin(pitch),cp=Math.cos(pitch),sr=Math.sin(roll),cr=Math.cos(roll);
     const rotate=p=>{const rx=p[0]*cr+p[1]*sr,ry=-p[0]*sr+p[1]*cr,yy=ry*cp-p[2]*sp,zz=ry*sp+p[2]*cp;return[rx*cy-zz*sy,yy,rx*sy+zz*cy];};
@@ -211,7 +232,7 @@
       };
       shapes.push({cx,cz,radius});
       const pts=[];
-      for(let i=0;i<n;i++){
+      for(let i=0;i<n;i+=4){
         const a=i/n*TAU,fine=noise[i]*45+(noise[(i+1)%n]+noise[(i+n-1)%n])*25;
         let r=radius(a)+fine;if(extras.length)r=Math.max(r,coverRadius(cx,cz,a,extras)/.9+20);if(main)r=Math.max(r,keepRadius(cx,cz,a)/.9+60);
         pts.push([cx+Math.cos(a)*r,cz+Math.sin(a)*r]);
@@ -235,7 +256,19 @@
     if(T.snow&&h>150)pyramid(m,x,h*.55-7,z,r*.45,h*.45+2,T.snow,5);
   }
   // Ocean tiles provide stable horizon geometry even when the camera crosses a tile.
-  function buildOcean(T,extent){const m=[],step=2500,n=Math.ceil(extent/step);for(let i=-n;i<n;i++)for(let j=-n;j<n;j++){const x=i*step,z=j*step;face(m,[[x,-7,z],[x+step,-7,z],[x+step,-7,z+step],[x,-7,z+step]],(i+j)%2===0?T.sea[0]:T.sea[1]);}for(const f of m)f.ground=-7;return m;}
+  function buildOcean(T,extent){const m=[],step=2500,n=Math.ceil(extent/step);for(let i=-n;i<n;i++)for(let j=-n;j<n;j++){const x=i*step,z=j*step,c=(i+j)%2===0?T.sea[0]:T.sea[1];face(m,[[x,-7,z],[x+step,-7,z],[x+step,-7,z+step]],c);face(m,[[x,-7,z],[x+step,-7,z+step],[x,-7,z+step]],c);}for(const f of m)f.ground=-7;return m;}
+  // Low-poly clouds: clusters of flattened, faceted double cones high over the sea (not solid), in the
+  // same soft cloud colours the old flat sky clouds used.
+  function buildClouds(extent,color){
+    const m=[];let s=97;const rnd=()=>{s=(Math.imul(s,1664525)+1013904223)>>>0;return s/4294967296;};
+    const blob=(x,y,z,r)=>{const top=[x,y+r*.7,z],bottom=[x,y-r*.35,z],ring=[];for(let i=0;i<4;i++){const a=i/4*TAU+r;ring.push([x+Math.cos(a)*r,y,z+Math.sin(a)*r*.8]);}
+      for(let i=0;i<4;i++){const p0=ring[i],p1=ring[(i+1)%4];m.push({v:[p0,p1,top],c:color,a:.75,d:1});m.push({v:[p1,p0,bottom],c:color,a:.75,d:1});}};
+    for(let i=0,count=Math.round(extent/260);i<count;i++){
+      const x=(rnd()-.5)*extent*1.6,z=(rnd()-.5)*extent*1.6,y=900+rnd()*700,r=140+rnd()*160;
+      for(let k=0,n=2+Math.floor(rnd()*2);k<n;k++)blob(x+(rnd()-.5)*r*2.4,y+(rnd()-.3)*r*.5,z+(rnd()-.5)*r*1.4,r*(.6+rnd()*.6));
+    }
+    return m;
+  }
   function buildWorld(buildings,skin,map=DEFAULT_MAP,ox=0,oz=0){
     seed=183;const m=[],terrain=map.terrain,T=TERRAIN[terrain]||TERRAIN.island;
     const land=map.landColor||T.land,coast=coastFor(map);
@@ -272,17 +305,6 @@
       const t=N.taxiway(C,home,rw),at=(lx,lz)=>C.runwayToWorld(home,rw,lx,lz),side=t.side;
       // Hold-short bars across both connectors, clear of the runway edge.
       for(const lz of [rw.half-30,t.far])for(const k of [0,3.5]){const a=at(side*(rw.width/2+24+k),lz-16),b=at(side*(rw.width/2+24+k),lz+16);taxiStrip(a,b,1.4,'#efd58d',2.5);}
-      // A red runway sign by the departure hold point, facing aircraft coming up the parallel taxiway. It stands
-      // on the runway-end side of the connector, outside every turn an aircraft makes there.
-      const s=lx=>at(side*lx,rw.half-8),l=s(rw.width/2+22),r=s(rw.width/2+36),lo=side>0?r:l,hi=side>0?l:r;
-      box(m,(l.x+r.x)/2,2,(l.z+r.z)/2,1.2,3,1.2,'#58605c');
-      m.push({v:[[lo.x,10,lo.z],[hi.x,10,hi.z],[hi.x,5,hi.z],[lo.x,5,lo.z]],c:'#a14339',t:'RWY '+rw.name,tc:'#ffffff'});
-      m.push({v:[[hi.x,10,hi.z],[lo.x,10,lo.z],[lo.x,5,lo.z],[hi.x,5,hi.z]],c:'#a14339',t:'RWY '+rw.name,tc:'#ffffff'});
-      // Where the runway's lane leaves the apron, a sign names the runway it leads to.
-      // It stands just past the turn, facing aircraft coming along the apron, with an arrow toward the lane.
-      const g=t.lane[0],south=g.z>=240,sx=g.x+34,e=south?7:-7,label=south?'RWY '+rw.name+' →':'← RWY '+rw.name;
-      box(m,sx,2,g.z,1.2,3,1.2,'#58605c');
-      m.push({v:[[sx+e,10,g.z],[sx-e,10,g.z],[sx-e,5,g.z],[sx+e,5,g.z]],c:'#2d3a33',t:label,tc:'#f4d774'});
     }
     const onTaxi=(x,z)=>taxiPaths.some(path=>path.some((b,i)=>{if(!i)return false;const a=path[i-1],dx=b.x-a.x,dz=b.z-a.z,t=Math.max(0,Math.min(1,((x-a.x)*dx+(z-a.z)*dz)/(dx*dx+dz*dz||1)));return Math.hypot(x-a.x-t*dx,z-a.z-t*dz)<40;}));
     // True when a point (island-local) lies on any runway's pavement (used for the boat).
@@ -290,6 +312,21 @@
     // True inside a runway's clear corridor — the pavement plus room to the sides and a long approach /
     // departure zone off each end — so trees and cabins never grow into a takeoff or landing path.
     const inCorridor=(x,z)=>runways.some(rw=>{const dx=x-rw.cx,dz=z-rw.cz,lx=rw.cos*dx+rw.sin*dz,lz=-rw.sin*dx+rw.cos*dz;return Math.abs(lx)<rw.width/2+120&&Math.abs(lz)<rw.half+650;});
+    // A runway sign beside each runway, a little way in from the end where aircraft line up, so it reads ahead
+    // of the pilot on the takeoff roll. It stands on whichever side is clear of other runways and taxi routes,
+    // well outside the wingtips of an aircraft on the centreline.
+    if(C&&N)for(const rw of runways){
+      const t=N.taxiway(C,home,rw),at=(lx,lz)=>C.runwayToWorld(home,rw,lx,lz);
+      const clear=p=>!runways.some(o=>{if(o===rw)return false;const dx=p.x-o.cx,dz=p.z-o.cz,lx=o.cos*dx+o.sin*dz,lz=-o.sin*dx+o.cos*dz;return Math.abs(lx)<o.width/2+45&&Math.abs(lz)<o.half+45;})&&!onTaxi(p.x,p.z);
+      for(const [sgn,lz] of [[-t.side,rw.half-200],[t.side,rw.half-200],[-t.side,-rw.half+200],[t.side,-rw.half+200]]){
+        const l=at(sgn*(rw.width/2+22),lz),r=at(sgn*(rw.width/2+34),lz);if(!clear(l)||!clear(r))continue;
+        const lo=sgn>0?r:l,hi=sgn>0?l:r;
+        for(const q of [l,r])box(m,q.x,2,q.z,1.2,3,1.2,'#58605c');
+        m.push({v:[[lo.x,10,lo.z],[hi.x,10,hi.z],[hi.x,5,hi.z],[lo.x,5,lo.z]],c:'#a14339',t:'RWY '+rw.name,tc:'#ffffff'});
+        m.push({v:[[hi.x,10,hi.z],[lo.x,10,lo.z],[lo.x,5,lo.z],[hi.x,5,hi.z]],c:'#a14339',t:'RWY '+rw.name,tc:'#ffffff'});
+        break;
+      }
+    }
     // Taxiways, apron, roads and service markings.
     box(m,175,1.7,310,310,.5,54,'#a8af95');box(m,235,1.8,10,190,.5,590,'#b7baa1');
     box(m,180,2.5,310,315,.1,1,'#f0d279',1);
@@ -464,7 +501,7 @@
       if(sig!==this.signature){
         this.chunks=layout.map(i=>({x:i.x,z:i.z,faces:buildWorld(i.buildings,state.skin,i.map,i.x,i.z)}));
         const T=TERRAIN[layout[0].map.terrain]||TERRAIN.island,extent=Math.max(12000,...layout.map(i=>Math.max(Math.abs(i.x),Math.abs(i.z))+9000));
-        this.ocean=buildOcean(T,extent);this.signature=sig;this.terrain=layout[0].map.terrain;this.map=layout[0].map;this.layout=layout;
+        this.ocean=buildOcean(T,extent);this.oceanExtent=extent;this.signature=sig;this.terrain=layout[0].map.terrain;this.map=layout[0].map;this.layout=layout;
       }
       if(this.planeColor!==state.skin){this.plane=planeMesh(state.skin);this.planeColor=state.skin;}
     }
@@ -509,8 +546,6 @@
       const project=p=>{const d=sub(p,camera);return[dot(d,right),-dot(d,up),dot(d,forward)];};
       const screen=p=>[w/2+p[0]/p[2]*focal,h*.5+p[1]/p[2]*focal];
       this.projection={camera,project,screen,focal};
-      // Soft, geometric clouds, no textures or external assets.
-      if(!storm){ctx.fillStyle=sunset?'#f7e9cd80':'#f4f7e780';for(let i=0;i<(this.quality==='low'?4:8);i++){const x=((i*197+clock*1.4)%(w+150))-75,y=h*.10+(i%3)*h*.065;ctx.beginPath();ctx.ellipse(x,y,48+(i%3)*20,9+(i%2)*5,0,0,TAU);ctx.fill();}}
       const far=this.quality==='low'?9000:14000;
       // Only islands within view distance are drawn; the ocean always is. With the GPU, scenery that never
       // changes (ocean, islands, parked airliners) goes in `statics` and stays on the graphics card; `faces`
@@ -518,6 +553,7 @@
       const gpu=!!this.gpu,statics=[],faces=[],scenery=list=>{if(gpu)statics.push(list);else faces.push(...list);};
       const inView=isle=>Math.hypot(isle.x-camera[0],isle.z-camera[2])<far+6000;
       scenery(this.ocean);
+      if(!storm&&this.quality!=='low'){const key=(sunset?'sunset':'clear')+this.signature;if(this.cloudKey!==key){this.clouds=buildClouds(Math.min(40000,this.oceanExtent||12000),sunset?'#f7e9cd':'#f4f7e7');this.cloudKey=key;}scenery(this.clouds);}
       for(const chunk of this.chunks)if(inView(chunk))scenery(chunk.faces);
       if(!flight&&mode===6){
         if(look?.cabin){faces.length=0;statics.length=0;}
@@ -532,7 +568,7 @@
           const key=p.type+(p.color||state.skin);this.trafficMesh=this.trafficMesh||{};if(!this.trafficMesh[key])this.trafficMesh[key]=planeMesh(p.color||state.skin,p.type);
           faces.push(...transformed(this.trafficMesh[key],chunk.x+pose.x,5.1+pose.y,chunk.z+pose.z,pose.yaw,pose.pitch,0,1.4));}}
       if(flight){
-        if(mode!==1&&mode!==3){faces.push(...transformed(this.plane.filter(f=>flight.gear||!f.gear),flight.x,flight.y+2,flight.z,flight.yaw,flight.pitch,flight.roll,1));
+        if(mode!==1&&mode!==3){faces.push(...transformed(foldGear(this.plane,flight.gearPos??(flight.gear?1:0)),flight.x,flight.y+2,flight.z,flight.yaw,flight.pitch,flight.roll,1));
           if(flight.gear&&!root.SkyAssets){const wheel=[];box(wheel,-1,-1.4,.4,.3,.8,.7,'#3e534d');box(wheel,1,-1.4,.4,.3,.8,.7,'#3e534d');box(wheel,0,-1.2,-3,.3,.8,.7,'#3e534d');faces.push(...transformed(wheel,flight.x,flight.y+2,flight.z,flight.yaw,flight.pitch,flight.roll));}
           if(flight.type!=='passenger'){const prop=[];const rpm=flight.throttle*30+(flight.onGround?0:Math.min(6,flight.airSpeed*.08)),dtc=Math.min(.1,Math.max(0,clock-(this.propClock??clock)));this.propClock=clock;this.propAngle=(this.propAngle||0)+rpm*dtc;const a=this.propAngle,cy=Math.cos(a)*2.2,sy=Math.sin(a)*2.2;face(prop,[[-cy,-sy,-5.1],[cy,sy,-5.1],[cy+.1,sy+.1,-5.1],[-cy+.1,-sy+.1,-5.1]],'#a7c0ae');faces.push(...transformed(prop,flight.x,flight.y+2.5,flight.z,flight.yaw,flight.pitch,flight.roll));}
         }
@@ -543,9 +579,22 @@
         for(let i=flight.gate;i<Math.min(flight.gate+3,flight.gates.length);i++){
           const g=flight.gates[i],prev=i?flight.gates[i-1]:{x:0,z:630};
           const yaw=g.yaw??Math.atan2(g.x-prev.x,-(g.z-prev.z));const ring=[];const r=flight.gateRadius;
-          for(let j=0;j<20;j++){const a=j/20*TAU,b=(j+1)/20*TAU;face(ring,[[Math.cos(a)*r,Math.sin(a)*r,0],[Math.cos(b)*r,Math.sin(b)*r,0],[Math.cos(b)*(r+5),Math.sin(b)*(r+5),0],[Math.cos(a)*(r+5),Math.sin(a)*(r+5),0]],i===flight.gate?'#e4f0a5':'#bbcfa7');}
+          for(let j=0;j<6;j++){const a=j/6*TAU,b=(j+1)/6*TAU,c=i===flight.gate?'#e4f0a5':'#bbcfa7',P=(t,q,z)=>[Math.cos(t)*q,Math.sin(t)*q,z],R=r+5;face(ring,[P(a,r,-2),P(b,r,-2),P(b,R,-2),P(a,R,-2)],c);face(ring,[P(a,R,2),P(b,R,2),P(b,r,2),P(a,r,2)],c);face(ring,[P(a,R,-2),P(b,R,-2),P(b,R,2),P(a,R,2)],shade(c,.88));face(ring,[P(a,r,2),P(b,r,2),P(b,r,-2),P(a,r,-2)],shade(c,.78));}
           faces.push(...transformed(ring,g.x,g.y,g.z,yaw));
         }
+      }
+      if(flight?.onGround&&flight.taxiPath?.length>1){
+        const path=flight.taxiPath;let next=14,walked=0,shown=0;
+        for(let i=1;i<path.length&&shown<24;i++){
+          const a=path[i-1],b=path[i],dx=b.x-a.x,dz=b.z-a.z,L=Math.hypot(dx,dz);if(L<.01)continue;const ux=dx/L,uz=dz/L,nx=-uz,nz=ux;
+          while(next<=walked+L&&shown<24){const t=next-walked,cx=a.x+ux*t,cz=a.z+uz*t,y=2.9;
+            // A flat chevron pointing along the route.
+            for(const k of [-1,1]){const tx=cx+ux*3,tz=cz+uz*3,bx=cx-ux*1.5+nx*k*4.5,bz=cz-uz*1.5+nz*k*4.5;face(faces,[[tx,y,tz],[bx,y,bz],[bx-ux*1.8,y,bz-uz*1.8],[tx-ux*1.8,y,tz-uz*1.8]],'#efd58d');}
+            next+=16;shown++;}
+          walked+=L;
+        }
+        const e=path.at(-1),p=path.at(-2),dx=e.x-p.x,dz=e.z-p.z,L=Math.hypot(dx,dz)||1,nx=-dz/L*9,nz=dx/L*9;
+        face(faces,[[e.x+nx,2.9,e.z+nz],[e.x-nx,2.9,e.z-nz],[e.x-nx+dx/L*1.6,2.9,e.z-nz+dz/L*1.6],[e.x+nx+dx/L*1.6,2.9,e.z+nz+dz/L*1.6]],'#e4f0a5');
       }
       if(flight?.navPath?.length&&!flight.onGround){
         const begin=flight.navIndex||0;

@@ -8,7 +8,10 @@ from mathutils import Vector
 OUT=Path(__file__).resolve().parent
 previous=[s for s in bpy.data.scenes if s.name.startswith('SkyPlane / Coastal aviation centre')]
 scene=bpy.data.scenes.new('SkyPlane / Coastal aviation centre')
-bpy.context.window.scene=scene
+if bpy.context.window:bpy.context.window.scene=scene
+else:
+    bpy.data.scenes.remove(scene);scene=bpy.context.scene
+    for ob in list(scene.objects):bpy.data.objects.remove(ob,do_unlink=True)
 for old_scene in previous:
     for ob in list(old_scene.objects):bpy.data.objects.remove(ob,do_unlink=True)
     for col in list(old_scene.collection.children):bpy.data.collections.remove(col)
@@ -35,19 +38,18 @@ rubber=mat('Rubber and seals','#202a31',rough=.8);green=mat('Plant leaves','#477
 light=mat('Warm diffused light','#fff1cb',rough=.25);red=mat('Safety red','#cf5445',rough=.45)
 def cube(name,pos,size,m,bevel=0,solid=False,gear=False):
     bpy.ops.mesh.primitive_cube_add(size=1,location=point(pos));o=move(bpy.context.object);o.name=name;o.dimensions=(size[0],size[2],size[1]);bpy.ops.object.transform_apply(location=False,rotation=False,scale=True);o.data.materials.append(m)
-    if bevel:
-        b=o.modifiers.new('Manufactured edge radius','BEVEL');b.width=bevel;b.segments=2
-        n=o.modifiers.new('Weighted corner normals','WEIGHTED_NORMAL')
+    # Low-poly build: every box keeps sharp, unbevelled edges (the bevel argument is kept for reference).
     if solid:colliders.append(dict(x=pos[0],y=pos[1]-size[1]/2,z=pos[2],w=size[0],h=size[1],d=size[2],c='#'+''.join(f'{round(c*255):02x}' for c in m.diffuse_color[:3]),solid=True))
     if gear:o['gear']=True
     return o
 def mesh(name,vertices,faces,m,smooth=False):
     data=bpy.data.meshes.new(name);data.from_pydata([point(p) for p in vertices],[],faces);data.update();o=bpy.data.objects.new(name,data);current.objects.link(o);data.materials.append(m)
-    for p in data.polygons:p.use_smooth=smooth
+    for p in data.polygons:p.use_smooth=False
     return o
 def beam(name,a,b,r,m,verts=10):
+    verts=4 if verts<=12 else 6  # extra low poly: square struts, hexagonal large drums
     aa,bb=Vector(point(a)),Vector(point(b));bpy.ops.mesh.primitive_cylinder_add(vertices=verts,radius=r,depth=(bb-aa).length,location=(aa+bb)/2);o=move(bpy.context.object);o.name=name;o.rotation_euler=(bb-aa).to_track_quat('Z','Y').to_euler();o.data.materials.append(m)
-    for p in o.data.polygons:p.use_smooth=len(p.vertices)==4
+    for p in o.data.polygons:p.use_smooth=False
     return o
 def sign(text,x,y,z,w):
     signs.append(dict(v=[[x-w/2,y+1,z],[x+w/2,y+1,z],[x+w/2,y-1,z],[x-w/2,y-1,z]],c='#182d39',t=text,tc='#f4e9ca'))
@@ -65,7 +67,6 @@ def seat(x,z):
 def desk(x,z,w=10):
     cube('Oak desk carcass',(x,2.66,z),(w,1.32,3.5),wood,.08,True)
     cube('Stone counter',(x,3.38,z),(w+.25,.18,3.8),stone,.08)
-    for dx in range(-int(w/2)+1,int(w/2),1):cube('Fluted desk front',(x+dx,2.67,z+1.79),(.065,1.2,.08),gold)
     cube('Monitor stem',(x,3.66,z-.5),(.13,.5,.13),metal)
     cube('Monitor',(x,4.05,z-.5),(1.8,.98,.1),dark,.05)
     cube('Monitor display',(x,4.05,z-.435),(1.6,.8,.015),teal)
@@ -79,17 +80,13 @@ def planter(x,z):
 group('terminal')
 cube('Continuous terrazzo floor',(384,1.9,-35),(94,.2,264),floor)
 cube('Central concourse carpet',(384,2.015,-35),(13,.025,251),blue)
-for x in range(340,432,6):
-    if not 377<x<391:cube('Terrazzo joint',(x,2.024,-35),(.025,.012,260),stone)
-for z in range(-164,97,6):
-    for x in [357.75,410.25]:cube('Terrazzo joint',(x,2.024,z),(39.5,.012,.025),stone)
 # Vaulted roof and exposed ribs. The centre strip is a continuous skylight.
-for i in range(18):
-    x0=335+i*5.5;x1=x0+5.5;h0=13+5*math.sin(i/18*math.pi);h1=13+5*math.sin((i+1)/18*math.pi)
-    mesh('Curved roof panel',[(x0,h0,-170),(x1,h1,-170),(x1,h1,101),(x0,h0,101),(x0,h0+.4,-170),(x1,h1+.4,-170),(x1,h1+.4,101),(x0,h0+.4,101)],[(0,3,2,1),(4,5,6,7),(0,1,5,4),(3,7,6,2)],glass if 8<=i<=9 else white)
+for i in range(5):
+    x0=335+i*19.8;x1=x0+19.8;h0=13+5*math.sin(i/5*math.pi);h1=13+5*math.sin((i+1)/5*math.pi)
+    mesh('Curved roof panel',[(x0,h0,-170),(x1,h1,-170),(x1,h1,101),(x0,h0,101),(x0,h0+.4,-170),(x1,h1+.4,-170),(x1,h1+.4,101),(x0,h0+.4,101)],[(0,3,2,1),(4,5,6,7),(0,1,5,4),(3,7,6,2)],glass if i==2 else white)
 for z in range(-165,101,22):
-    for i in range(12):
-        x0=337+i*7.8;x1=x0+7.8;beam('Arched steel roof rib',(x0,12.65+4.9*math.sin(i/12*math.pi),z),(x1,12.65+4.9*math.sin((i+1)/12*math.pi),z),.14,metal)
+    for i in range(4):
+        x0=337+i*23.4;x1=x0+23.4;beam('Arched steel roof rib',(x0,12.65+4.9*math.sin(i/4*math.pi),z),(x1,12.65+4.9*math.sin((i+1)/4*math.pi),z),.14,metal)
     for x in [338,431]:
         beam('Column',(x,2,z),(x,13,z),.24,metal,16);colliders.append(dict(x=x,y=2,z=z,w=.6,h=11,d=.6,c='#a0afb2',solid=True))
     cube('Suspended linear light',(385,10,z),(15,.12,.3),light,.04)
@@ -106,7 +103,6 @@ for z in [32,94]:planter(441,z)
 for z in [29,47,65]:
     desk(417,z,10);sign('CHECK-IN  /  SKY PLANE',417,6,z-2.2,10)
 cube('Baggage belt',(425,2.55,47),(2.6,1.1,57),rubber,.2,True)
-for z in range(22,75,2):cube('Belt rib',(425,3.12,z),(2.5,.03,.04),metal)
 for z in [27,45,63]:
     for x in [399,405]:beam('Queue stanchion',(x,2,z),(x,3.1,z),.06,metal,8)
     beam('Queue rope',(399,3,z),(405,3,z),.025,dark,6)
@@ -152,7 +148,6 @@ cube('Workshop roof',(367,10.1,156),(62,.5,81),dark,.1)
 desk(384,165,12)
 for z in [147,154,176,183]:
     cube('Tool drawer cabinet',(388,2.8,z),(6,1.6,4),teal,.1,True)
-    for y in [2.4,2.8,3.2]:cube('Drawer handle',(384.92,y,z),(.08,.08,2.8),metal,.02)
 sign('ENGINEERING  /  MAINTENANCE',367,8,119,45)
 desk(329,220,6);sign('A1 / GROUND SERVICES',319,6,232,28)
 for z in [204,214]:
@@ -164,73 +159,116 @@ for z in [204,214]:
 group('hangar')
 for x in [-43,43]:cube('Hangar side',(x,16,0),(1,28,100),stone,.15)
 cube('Hangar rear',(0,17,-50),(86,30,1),dark,.15)
-for i in range(16):
-    x=-44+i*5.5;nx=x+5.5;y=29+11*math.sin(i/16*math.pi);ny=29+11*math.sin((i+1)/16*math.pi)
+for i in range(4):
+    x=-44+i*88/4;nx=x+88/4;y=29+11*math.sin(i/4*math.pi);ny=29+11*math.sin((i+1)/4*math.pi)
     mesh('Curved hangar roof',[(x,y,-52),(nx,ny,-52),(nx,ny,52),(x,y,52)],[(0,1,2,3)],metal)
 cube('Hangar floor',(0,2,0),(89,.12,104),stone)
 for z in [-45,-20,5,30,50]:beam('Hangar roof truss',(-42,28,z),(42,28,z),.28,metal)
 group('tower')
 beam('Control tower tapered shaft',(0,2,0),(0,108,0),10,stone,20)
 for y,r in [(100,20),(108,23),(123,24)]:beam('Tower deck',(0,y,0),(0,y+2,0),r,dark,24)
-for i in range(16):
-    a=i*math.tau/16;b=(i+1)*math.tau/16;mesh('Control room glazing',[(math.cos(a)*20,110,math.sin(a)*20),(math.cos(b)*20,110,math.sin(b)*20),(math.cos(b)*22,123,math.sin(b)*22),(math.cos(a)*22,123,math.sin(a)*22)],[(0,1,2,3)],glass)
+for i in range(6):
+    a=i*math.tau/6;b=(i+1)*math.tau/6;mesh('Control room glazing',[(math.cos(a)*20,110,math.sin(a)*20),(math.cos(b)*20,110,math.sin(b)*20),(math.cos(b)*22,123,math.sin(b)*22),(math.cos(a)*22,123,math.sin(a)*22)],[(0,1,2,3)],glass)
 beam('Tower aerial',(0,125,0),(0,149,0),.35,metal)
 group('fuel')
 beam('Fuel tank',(0,8,-10),(0,8,10),7,white,24)
 for z in [-7,7]:cube('Tank cradle',(0,3.5,z),(12,3,2),dark,.2)
 cube('Pump station',(11,3.3,0),(3,2.6,3),teal,.2)
-# Aircraft: smooth sectional fuselages, airfoil wings, engine fans and cockpit glazing.
+# Aircraft: low-poly hexagonal fuselages, diamond-section wings, and fittings placed on the actual hull surface.
+# The hexagon has flat vertical sides (so windows and livery sit flush) and a keel at the bottom (for the gear).
+HULL_N=6;HULL_K=1/math.cos(math.pi/HULL_N)
+def hull_ring(rx,ry,cy):return [(math.cos(a)*rx*HULL_K,cy+math.sin(a)*ry*HULL_K) for a in [math.pi/6+i*math.tau/HULL_N for i in range(HULL_N)]]
 def hull(name,stations,m):
-    v=[];n=32
+    v=[];n=HULL_N
     for z,rx,ry,cy in stations:
-        for i in range(n):a=i/n*math.tau;v.append((math.cos(a)*rx,cy+math.sin(a)*ry,z))
+        for x,y in hull_ring(rx,ry,cy):v.append((x,y,z))
     faces=[]
     for j in range(len(stations)-1):
         for i in range(n):faces.append((j*n+i,j*n+(i+1)%n,(j+1)*n+(i+1)%n,(j+1)*n+i))
-    faces.extend([tuple(range(n-1,-1,-1)),tuple((len(stations)-1)*n+i for i in range(n))]);return mesh(name,v,faces,m,True)
-def wing(name,side,span,z,y,chord,tip,m):
+    faces.extend([tuple(range(n-1,-1,-1)),tuple((len(stations)-1)*n+i for i in range(n))]);return mesh(name,v,faces,m)
+def section(stations,z):
+    # The hull between two stations is a straight blend of their rings, so this is its exact cross-section.
+    z=max(stations[0][0],min(stations[-1][0],z))
+    for a,b in zip(stations,stations[1:]):
+        if a[0]<=z<=b[0]:
+            t=(z-a[0])/((b[0]-a[0]) or 1);ra,rb=hull_ring(*a[1:]),hull_ring(*b[1:])
+            return [(p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t) for p,q in zip(ra,rb)]
+def half_width(stations,z,y):
+    ring=section(stations,z);best=0
+    for (x0,y0),(x1,y1) in zip(ring,ring[1:]+ring[:1]):
+        if min(y0,y1)<=y<=max(y0,y1) and y0!=y1:best=max(best,abs(x0+(x1-x0)*(y-y0)/(y1-y0)))
+    return best
+def surface_y(stations,z,x,top):
+    ring=section(stations,z);ys=[]
+    for (x0,y0),(x1,y1) in zip(ring,ring[1:]+ring[:1]):
+        if min(x0,x1)<=x<=max(x0,x1) and x0!=x1:ys.append(y0+(y1-y0)*(x-x0)/(x1-x0))
+    return (max(ys) if top else min(ys)) if ys else ring[1 if top else 4][1]
+def side_point(stations,side,y,z,lift=.012):return (side*(half_width(stations,z,y)+lift),y,z)
+def side_patch(name,stations,side,y0,y1,z0,z1,m):
+    # A flat panel on the fuselage side, split at every station so it follows the hull exactly.
+    zs=sorted({z0,z1,*[s[0] for s in stations if z0<s[0]<z1]})
+    for a,b in zip(zs,zs[1:]):
+        mesh(name,[side_point(stations,side,y0,a),side_point(stations,side,y0,b),side_point(stations,side,y1,b),side_point(stations,side,y1,a)],[(0,1,2,3)],m)
+def wing(name,side,span,z,y,chord,tip,m,root=.65):
+    # A four-point (diamond) section at the root and the tip only. The root starts inside the fuselage.
     v=[]
-    for x,c,zz,yy in [(.65,chord,z,y),(span*.55,chord*.75,z+.4,y+.12),(span,tip,z+1.1,y+.32)]:
-        for u,h in [(0,0),(.12,.12),(.4,.10),(1,0),(.45,-.035),(.1,-.035)]:v.append((side*x,yy+h,zz+c*u))
-    fs=[]
-    for j in range(2):
-        for i in range(6):fs.append((j*6+i,j*6+(i+1)%6,(j+1)*6+(i+1)%6,(j+1)*6+i))
-    fs.extend([(0,5,4,3,2,1),(12,13,14,15,16,17)]);mesh(name,v,fs,m)
-def wheels():
-    for x,z in [(-1.2,1),(1.2,1),(0,-3.6)]:
-        o=beam('Landing gear oleo',(x,-.4,z),(x,-1.55,z),.08,metal);o['gear']=True
-        o=beam('Tyre',(x-.15,-1.65,z),(x+.15,-1.65,z),.35,rubber,20);o['gear']=True
-        o=beam('Wheel hub',(x-.16,-1.65,z),(x+.16,-1.65,z),.18,metal,16);o['gear']=True
+    for x,c,zz,yy in [(root,chord,z,y),(span,tip,z+1.1,y+.32)]:
+        for u,h in [(0,0),(.35,.1),(1,0),(.4,-.035)]:v.append((side*x,yy+h,zz+c*u))
+    fs=[(i,(i+1)%4,4+(i+1)%4,4+i) for i in range(4)]
+    fs.extend([(0,3,2,1),(4,5,6,7)]);mesh(name,v,fs,m)
+def wing_at(span,z,y,chord,tip,x,root=.65):
+    t=(x-root)/(span-root);return y+.32*t,z+1.1*t,chord+(tip-chord)*t   # centreline height, leading edge, chord
+def gear_leg(stations,x,z,fold):
+    # Strut from the hull keel (the hinge the game folds it about) down to the wheel; wheel bottom stays at -2.0.
+    ax=max(-.45,min(.45,x));top=surface_y(stations,z,ax,False)+.06
+    for o in [beam('Landing gear oleo',(ax,top,z),(x,-1.5,z),.08,metal),
+              beam('Tyre',(x-.15,-1.65,z),(x+.15,-1.65,z),.35,rubber,20),
+              beam('Wheel hub',(x-.16,-1.65,z),(x+.16,-1.65,z),.18,metal,16),
+              cube('Gear fairing',(ax,top-.05,z),(.28,.14,.5),metal)]:
+        o['gear']=True;o['pivot']=[ax,top,z];o['fold']=fold
 for kind in ['trainer','jet','cargo','military']:
     group(kind);jet=kind=='jet';body=[(-6.8,.04,.05,.6),(-6.45,.4,.48,.6),(-5.8,.8,.85,.65),(-4.7,1.03,1.05,.65),(-2.5,1.08,1.08,.65),(0,1.08,1.08,.65),(3,1.02,1.02,.7),(4.8,.78,.85,.8),(6,.45,.58,.92),(7,.06,.12,1)] if jet else [(-5,.10,.16,.55),(-4.7,.45,.5,.55),(-3.7,.73,.73,.55),(-2.4,.86,.89,.62),(-1.1,.92,1.07,.7),(1,.87,.94,.65),(2.4,.65,.68,.6),(3.6,.4,.45,.7),(5.15,.07,.12,.9)]
-    hull('Smooth pressurised fuselage',body,white if kind!='military' else metal)
+    hull('Low-poly fuselage',body,white if kind!='military' else metal)
+    span,wz,wy,chord=(8.4,-1.2,0,3.1) if jet else (7.8,-1.2,1.13,1.85)
+    tz=4.35 if jet else 3.6
     for side in [-1,1]:
-        wing('Main airfoil wing',side,8.4 if jet else 7.8,-1.2,0 if jet else 1.13,3.1 if jet else 1.85,1.0,white)
-        wing('Horizontal stabiliser',side,3.15,4.35 if jet else 3.6,1.0,1.5,.65,teal)
+        wing('Main airfoil wing',side,span,wz,wy,chord,1.0,white)
+        wing('Horizontal stabiliser',side,3.15,tz,1.0,1.5,.65,teal,root=half_width(body,tz+.4,1.0)*.5)
+        tipy,tipz,tipc=wing_at(span,wz,wy,chord,1.0,span)
         if jet:
-            cube('Winglet',(side*8.4,1.13,3.5),(.12,1.6,.6),teal,.04)
-            for z in [-3.6+i*.58 for i in range(15)]:cube('Cabin window',(side*1.07,1.12,z),(.035,.32,.23),dark,.1)
-            for x in [side*3.4]:
-                beam('Turbofan nacelle',(x,-.62,-2),(x,-.62,.7),.74,white,28)
-                beam('Engine inlet',(x,-.62,-2.035),(x,-.62,-2.06),.61,rubber,28)
-                beam('Spinner',(x,-.62,-2.08),(x,-.62,-2.28),.17,metal,20)
-                for k in range(18):
-                    a=k/18*math.tau;b=a+.18;mesh('Fan blade',[(x+math.cos(a)*.18,-.62+math.sin(a)*.18,-2.085),(x+math.cos(b)*.59,-.62+math.sin(b)*.59,-2.085),(x+math.cos(b+.13)*.59,-.62+math.sin(b+.13)*.59,-2.085)],[(0,1,2)],metal)
+            cube('Winglet',(side*(span-.06),tipy+.85,tipz+.55),(.12,1.6,.6),teal)
+            side_patch('Cabin window band',body,side,1.0,1.24,-3.6,4.5,dark)
+            x=side*3.4;ny,nz,nc=wing_at(span,wz,wy,chord,1.0,3.4)
+            beam('Turbofan nacelle',(x,-.62,-2),(x,-.62,.7),.74,white,28)
+            cube('Engine pylon',(x,(ny-.62)/2+.1,-.4),(.2,ny+.5,1.2),white)
+            beam('Engine inlet',(x,-.62,-2.01),(x,-.62,-2.06),.61,rubber,28)
+            beam('Spinner',(x,-.62,-2.06),(x,-.62,-2.28),.17,metal,20)
+            for k in range(5):
+                a=k/5*math.tau;b=a+.45;mesh('Fan blade',[(x+math.cos(a)*.18,-.62+math.sin(a)*.18,-2.085),(x+math.cos(b)*.59,-.62+math.sin(b)*.59,-2.085),(x+math.cos(b+.13)*.59,-.62+math.sin(b+.13)*.59,-2.085)],[(0,1,2)],metal)
         else:
-            mesh('Cockpit side glazing',[(side*.81,1.1,-2.2),(side*.78,1.54,-1.45),(side*.82,1.54,-.35),(side*.89,1.02,-.15)],[(0,1,2,3)],dark)
-            beam('Wing strut',(side*.65,-.05,.25),(side*4.8,1.35,1.25),.04,metal,8)
-            for z in [.65,1.45]:cube('Cabin glazing',(side*.86,1.06,z),(.04,.4,.53),dark,.07)
-        beam('Livery stripe',(side*.8,.5,-3),(side*.57,.53,3),.055,teal,6)
-        cube('Door handle',(side*.91,.8,-.3),(.04,.04,.24),metal,.015)
-        beam('Navigation light',(side*7.7,1.5,2.2),(side*7.7,1.52,2.2),.07,red if side<0 else teal,12)
+            # Glazing stays on the flat side panel (below the hull's upper corner) so it lies flush.
+            mesh('Cockpit side glazing',[side_point(body,side,.9,-2.2),side_point(body,side,1.1,-1.6),side_point(body,side,1.1,-.35),side_point(body,side,.85,-.15)],[(0,1,2,3)],dark)
+            sy,sz,sc=wing_at(span,wz,wy,chord,1.0,4.8)
+            beam('Wing strut',(side*half_width(body,.25,-.05),-.05,.25),(side*4.8,sy-.02,sz+sc*.4),.04,metal,8)
+            for z in [.65,1.45]:side_patch('Cabin glazing',body,side,.8,1.08,z-.26,z+.26,dark)
+        side_patch('Livery stripe',body,side,.45,.56,-3,3,teal)
+        cube('Door handle',side_point(body,side,.8,-.3,.03),(.04,.04,.24),metal)
+        beam('Navigation light',(side*(span-.02),tipy+.06,tipz+tipc*.5),(side*(span-.02),tipy+.09,tipz+tipc*.5),.07,red if side<0 else teal,12)
     mesh('Swept vertical tail',[(-.08,.9,3.6),(.08,.9,3.6),(.08,4.45,5.6),(-.08,4.45,5.6),(-.08,4.35,6.3),(.08,4.35,6.3),(.08,.9,5.8),(-.08,.9,5.8)],[(0,3,4,7),(1,6,5,2),(0,1,2,3),(3,2,5,4),(4,5,6,7)],teal)
-    mesh('Front windshield',[(-.7,1.15,-3.0),(.7,1.15,-3.0),(.65,1.62,-1.65),(-.65,1.62,-1.65)],[(0,1,2,3)],dark)
-    beam('Windshield centre frame',(0,1.15,-3.02),(0,1.65,-1.64),.03,metal,8)
+    # Windshield: two panes lying on the two upper hull faces, meeting at the ridge.
+    top=lambda z,x:(x,surface_y(body,z,x,True)+.012,z)
+    za,zb=(-4.9,-3.9) if jet else (-3.0,-1.65)
+    wa,wb=half_width(body,za,surface_y(body,za,0,True)-.35)*.8,half_width(body,zb,surface_y(body,zb,0,True)-.35)*.8
+    for s in [-1,1]:mesh('Front windshield',[top(za,s*wa),top(za,0),top(zb,0),top(zb,s*wb)],[(0,1,2,3)],dark)
+    beam('Windshield centre frame',top(za-.02,0),top(zb+.01,0),.03,metal,8)
     if kind=='cargo':
         for side in [-1,1]:
-            beam('Cargo turboprop pod',(side*3,.5,-2.4),(side*3,.5,-.2),.45,white,24)
-            beam('Cargo propeller',(side*3-1.1,.5,-2.45),(side*3+1.1,.5,-2.45),.07,rubber,8)
-    wheels()
+            py,pz,pc=wing_at(span,wz,wy,chord,1.0,3)
+            beam('Cargo turboprop pod',(side*3,py-.42,-2.4),(side*3,py-.42,-.2),.45,white,24)
+            beam('Cargo propeller',(side*3-1.1,py-.42,-2.45),(side*3+1.1,py-.42,-2.45),.07,rubber,8)
+    # Main gear folds sideways into the keel, the nose leg folds back.
+    for x in [-1.2,1.2]:gear_leg(body,x,1.0,'side')
+    gear_leg(body,0,-3.6 if not jet else -4.8,'nose')
 # Rounded passenger character, shown walking through the concourse by the game.
 group('person')
 skin=mat('Passenger skin','#bf9c7d',rough=.8)
@@ -242,26 +280,27 @@ for side in [-1,1]:
     beam('Jacket sleeve',(side*.23,1.35,0),(side*.31,.95,side*.10),.075,blue,10)
     beam('Hand',(side*.31,.95,side*.10),(side*.31,.80,side*.10),.052,skin,10)
 beam('Neck',(0,1.41,0),(0,1.49,0),.075,skin,12)
-bpy.ops.mesh.primitive_uv_sphere_add(segments=16,ring_count=8,radius=1,location=point((0,1.62,0)));o=move(bpy.context.object);o.name='Passenger head';o.scale=(.14,.13,.19);o.data.materials.append(skin)
-for polygon in o.data.polygons:polygon.use_smooth=True
+bpy.ops.mesh.primitive_uv_sphere_add(segments=4,ring_count=3,radius=1,location=point((0,1.62,0)));o=move(bpy.context.object);o.name='Passenger head';o.scale=(.14,.13,.19);o.data.materials.append(skin)
+for polygon in o.data.polygons:polygon.use_smooth=False
 cube('Rolling suitcase',(.48,.32,.21),(.29,.56,.24),gold,.06)
 beam('Suitcase handle',(.48,.6,.21),(.40,.88,.1),.018,metal,6)
-# Export evaluated Blender geometry with smooth corner normals. Fonts use runtime sign textures.
+# Export evaluated Blender geometry as flat low-poly facets (no per-corner normals). Fonts use runtime sign textures.
 bpy.context.view_layer.update();deps=bpy.context.evaluated_depsgraph_get();assets={}
 for name,col in groups.items():
     faces=[]
     for ob in col.objects:
         if ob.type!='MESH':continue
         ev=ob.evaluated_get(deps);me=ev.to_mesh();mat0=ob.data.materials[0];rgba=mat0.diffuse_color
-        color='#'+''.join(f'{round(c*255):02x}' for c in rgba[:3]);normalmat=ob.matrix_world.to_3x3().inverted().transposed()
+        color='#'+''.join(f'{round(c*255):02x}' for c in rgba[:3])
         for poly in me.polygons:
-            vv=[];nn=[]
+            vv=[]
             for loopid in poly.loop_indices:
-                loop=me.loops[loopid];v=ob.matrix_world@me.vertices[loop.vertex_index].co;n=normalmat@me.corner_normals[loopid].vector
-                vv.append([round(v.x,4),round(v.z,4),round(-v.y,4)]);nn.append([round(n.x,4),round(n.z,4),round(-n.y,4)])
-            f=dict(v=vv,n=nn,c=color,d=0)
+                v=ob.matrix_world@me.vertices[me.loops[loopid].vertex_index].co
+                vv.append([round(v.x,4),round(v.z,4),round(-v.y,4)])
+            f=dict(v=vv,c=color,d=0)
             if rgba[3]<1:f['a']=round(rgba[3],3)
             if ob.get('gear'):f['gear']=True
+            if ob.get('pivot') is not None:f['pivot']=[round(c,4) for c in ob['pivot']];f['fold']=ob['fold']
             if mat0==teal:f['paint']=True
             faces.append(f)
         ev.to_mesh_clear()

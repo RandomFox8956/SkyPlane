@@ -1,4 +1,4 @@
-/* Offline WebGL renderer: depth-tested geometry, smooth normals, sunlight and soft shadows. */
+/* Offline WebGL renderer: depth-tested flat-shaded low-poly geometry, sunlight and soft shadows. */
 (function(root){
   'use strict';
   const V=`#version 300 es
@@ -17,7 +17,8 @@
   out vec4 result;
   void main(){if(shadowPass){result=vec4(1.);return;}
     vec4 base=label?texture(labelMap,texcoord):color;if(base.a<.01)discard;
-    vec3 N=normalize(normal);if(!gl_FrontFacing)N=-N;float sun=max(0.,dot(N,ld));float shade=1.;
+    // Low-poly look: each polygon is lit as one flat facet, whatever normals the mesh carries.
+    vec3 N=normalize(cross(dFdx(world),dFdy(world)));if(dot(N,eye-world)<0.)N=-N;float sun=max(0.,dot(N,ld));float shade=1.;
     if(shadows&&all(greaterThan(shadowPos,vec3(.002)))&&all(lessThan(shadowPos,vec3(.998)))){float occlusion=0.;float bias=max(.000006,.000024*(1.-sun));for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++){float depth=texture(shadowMap,shadowPos.xy+vec2(x,y)/2048.).r;occlusion+=shadowPos.z-bias>depth?1.:0.;}shade=1.-occlusion/9.*.68;}
     vec3 light=vec3(.32,.39,.46)+vec3(1.04,.94,.77)*sun*shade*(1.-cloud*.55);light+=vec3(.12,.11,.08)*max(0.,N.y);
     float shine=pow(max(0.,dot(N,normalize(ld+normalize(eye-world)))),48.)*.14*shade;

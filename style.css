@@ -118,3 +118,4 @@ body.immersive-work{background:#111f29;overflow:hidden}.immersive-work .sidebar,
 #work-meter{position:absolute;top:150px;left:50%;transform:translateX(-50%);width:320px;padding:14px;background:#102e3af2;color:#f4efd9;border-radius:8px;text-align:center;pointer-events:none}.work-meter-track{height:20px;background:#364c59;position:relative;margin:10px 0;overflow:hidden;border-radius:3px}#work-meter-band{position:absolute;height:100%;background:#8eaf58}#work-meter-needle{position:absolute;height:100%;width:4px;background:#fff6da}#work-meter small{font-size:12px}
 @media(max-width:850px){#work-tutorial{width:220px;right:10px;font-size:12px;max-height:35vh}#work-meter{width:230px;left:30%}}
 #work-tutorial .btn{background:#d8e4b1;color:#183c46;border-color:#a4bc9a}
+#hud-taxi.at-limit{outline:2px solid currentColor;outline-offset:-2px}
