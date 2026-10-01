@@ -579,7 +579,7 @@
         for(let i=flight.gate;i<Math.min(flight.gate+3,flight.gates.length);i++){
           const g=flight.gates[i],prev=i?flight.gates[i-1]:{x:0,z:630};
           const yaw=g.yaw??Math.atan2(g.x-prev.x,-(g.z-prev.z));const ring=[];const r=flight.gateRadius;
-          for(let j=0;j<6;j++){const a=j/6*TAU,b=(j+1)/6*TAU,c=i===flight.gate?'#e4f0a5':'#bbcfa7',P=(t,q,z)=>[Math.cos(t)*q,Math.sin(t)*q,z],R=r+5;face(ring,[P(a,r,-2),P(b,r,-2),P(b,R,-2),P(a,R,-2)],c);face(ring,[P(a,R,2),P(b,R,2),P(b,r,2),P(a,r,2)],c);face(ring,[P(a,R,-2),P(b,R,-2),P(b,R,2),P(a,R,2)],shade(c,.88));face(ring,[P(a,r,2),P(b,r,2),P(b,r,-2),P(a,r,-2)],shade(c,.78));}
+          for(let j=0;j<32;j++){const a=j/32*TAU,b=(j+1)/32*TAU,c=i===flight.gate?'#e4f0a5':'#bbcfa7',P=(t,q,z)=>[Math.cos(t)*q,Math.sin(t)*q,z],R=r+5;face(ring,[P(a,r,-2),P(b,r,-2),P(b,R,-2),P(a,R,-2)],c);face(ring,[P(a,R,2),P(b,R,2),P(b,r,2),P(a,r,2)],c);face(ring,[P(a,R,-2),P(b,R,-2),P(b,R,2),P(a,R,2)],shade(c,.88));face(ring,[P(a,r,2),P(b,r,2),P(b,r,-2),P(a,r,-2)],shade(c,.78));}
           faces.push(...transformed(ring,g.x,g.y,g.z,yaw));
         }
       }

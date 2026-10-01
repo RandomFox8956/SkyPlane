@@ -282,7 +282,7 @@
     ['tutorialDone','milestone','emergencyGrant'].forEach(k => s[k] = raw[k] === true);
     s.course.gates = Math.round(finite(raw.course?.gates, s.course.gates, 4, 12));
     s.course.radius = finite(raw.course?.radius, s.course.radius, 700, 1600);
-    s.course.altitude = finite(raw.course?.altitude, s.course.altitude, 120, 420);
+    s.course.altitude = finite(raw.course?.altitude, s.course.altitude, 120, 620);
     s.course.direction = raw.course?.direction === 'right' ? 'right' : raw.course?.direction === 'left' ? 'left' : s.course.direction;
     // Ghost traces only exist in competitive worlds.
     s.raceRecord = raw.routeVersion===2 && s.world.mode === 'competitive' ? sanitizeRecord(raw.raceRecord) : null;
@@ -460,11 +460,14 @@
     }
     const finishIdx=destRw.index;
     const spawn=Navigation.stand(home),arrivalStand=Navigation.stand(dest||home);
+    // The first and last gates sit on the climb-out and final approach; lift them so the whole ring clears the ground.
+    const gateRadius=difficulty(s).gate;
+    for(const g of [route.gates[0],route.gates.at(-1)])if(g)g.y=Math.max(g.y,terrainHeight(islands,g.x,g.z)+gateRadius+8);
 
     return { type,map:home.map.id,islands,destination:free?null:destination,finish:destination?1:0,x:spawn.x,y:2,z:spawn.z, vx:0,vy:0,vz:0, yaw:spawn.yaw,pitch:0,roll:0,phase:'parked',arrivalStand,navPath:route.path,navIndex:0,
       throttle:0,flaps:0,gear:true,gearPos:1,fuel:100,health:100,cargo:100,speed:0,airSpeed:0,verticalSpeed:0,
       gates:route.gates,gate:0,gateTimes:[],time:0,airborne:false,onGround:true,stall:false,
-      engineFailure:false,landed:false,crashed:false,completed:false,gateRadius:difficulty(s).gate,
+      engineFailure:false,landed:false,crashed:false,completed:false,gateRadius,
       maxAltitude:0, hardLanding:0, runwayHalf:homeRw.half, homeRunway:homeIdx, finishRunway:finishIdx,
       runwayName:homeRw.name, finishRunwayName:(destRw||homeRw).name, lastGateDistance:Infinity, refuelled:false };
   }
